@@ -96,7 +96,11 @@ function Coin({ small = false }: { small?: boolean }) {
     </span>
   );
 }
-const id = () => crypto.randomUUID();
+const id = () =>
+  crypto.randomUUID?.() ??
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
 
 export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
@@ -133,6 +137,7 @@ export default function App() {
   const active = conversations.find((c) => c.id === activeId);
   const messages = active?.messages || [];
   const isConcreteTool = tool !== 'none' && tool !== 'auto';
+  const needsHttps = !window.isSecureContext && window.location.protocol === 'http:';
 
   useEffect(() => {
     let mounted = true;
@@ -805,7 +810,9 @@ export default function App() {
                     ? `Downloading the brain… ${progress}%`
                     : isConcreteTool
                       ? 'This tool works without a local model.'
-                      : 'A tiny brain needs a compatible browser.'}
+                      : needsHttps
+                        ? 'Local AI needs a secure HTTPS connection.'
+                        : 'A tiny brain needs a compatible browser.'}
                 </span>
                 <button onClick={() => setSettings(true)}>
                   {isConcreteTool
@@ -851,6 +858,14 @@ export default function App() {
             <strong>{statusLabels[status]}</strong>
             {status === 'checking' && <CircularProgress size={16} />}
           </div>
+          {needsHttps && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              This page is using HTTP. Your browser only exposes local AI on secure pages.{' '}
+              <a href={window.location.href.replace(/^http:/, 'https:')}>Open the HTTPS version</a>.
+              If it does not load securely, the site owner needs to configure HTTPS for this domain
+              in GitHub Pages settings. Public tools still work over HTTP.
+            </Alert>
+          )}
           {status === 'unsupported' || status === 'unavailable' ? (
             <Alert severity="info" sx={{ mt: 2 }}>
               Use a supported desktop Chrome or Chromium browser with the Prompt API available and

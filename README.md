@@ -52,7 +52,9 @@ The workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) t
 
 For a new repository, select **Settings → Pages → Build and deployment → Source: GitHub Actions** once. GitHub's built-in workflow token cannot perform this initial enablement. Check **Settings → Environments → github-pages** if branch restrictions or deployment approval rules are configured. Subsequent pushes to `main` deploy automatically; after changing that setting, rerun any failed initial deployment from the Actions tab.
 
-Expected project URL: `https://predatorray.github.io/CheapGPT/` (available after the Pages deployment succeeds).
+Default project URL: `https://predatorray.github.io/CheapGPT/`. An existing GitHub Pages account custom domain can redirect this URL. The initial successful deployment reported `http://www.predatorray.me/CheapGPT/`.
+
+**Local AI requires a secure context.** For a custom domain, configure a valid certificate and enable **Enforce HTTPS** in GitHub Pages settings. HTTP visitors get an explicit warning and an HTTPS link in local AI setup; public tools remain usable. Check that the HTTPS variant works before enabling local AI. The deployment action verifies publishing; it does not verify the custom domain's certificate or DNS.
 
 ## License
 
