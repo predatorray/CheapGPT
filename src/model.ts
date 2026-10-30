@@ -7,10 +7,11 @@ const options = {
 };
 
 export const modelAvailability = () => window.LanguageModel?.availability(options);
-export async function loadModel(onProgress: (progress: number) => void) {
+export async function loadModel(onProgress: (progress: number) => void, signal?: AbortSignal) {
   if (!window.LanguageModel) throw new Error('This browser does not expose the LanguageModel API.');
   return window.LanguageModel.create({
     ...options,
+    signal,
     initialPrompts: [{ role: 'system', content: system }],
     monitor(monitor) {
       monitor.addEventListener('downloadprogress', (event) => {
@@ -20,20 +21,82 @@ export async function loadModel(onProgress: (progress: number) => void) {
   });
 }
 
+export interface ToolRequest {
+  tool: ToolId;
+  query: string;
+}
+
+// Conservative fallback for explicit requests when a small model cannot plan (or is unavailable).
+// General mentions in prose such as "write a poem about GitHub" stay ordinary chat.
+export function detectToolRequest(input: string): ToolRequest | null {
+  const query = input
+    .trim()
+    .replace(/’/g, "'")
+    .replace(/[?!]+$/, '')
+    .trim();
+  const patterns: [ToolId, RegExp][] = [
+    [
+      'weather',
+      /^(?:(?:what(?:'s| is)|how(?:'s| is))\s+)?(?:the\s+)?(?:weather|forecast)(?:\s+(?:forecast|like|today|tomorrow))?\s+(?:in|for|at)\s+(.+)$/i,
+    ],
+    [
+      'wikipedia',
+      /^(?:(?:search|check|use|ask)\s+)?(?:wikipedia|mediawiki)(?:\s+(?:for|about|on))?\s*:?\s+(.+)$/i,
+    ],
+    ['wikipedia', /^(?:search|look up|find)\s+(.+?)\s+(?:on|in|using)\s+wikipedia$/i],
+    [
+      'github',
+      /^(?:(?:search|check|use)\s+)?github(?:\s+(?:for|repos?(?:itories)?(?:\s+for)?))?\s*:?\s+(.+)$/i,
+    ],
+    ['github', /^(?:search|find|look up)\s+(.+?)\s+(?:on|in|using)\s+github$/i],
+    ['places', /^(?:(?:search|check|use)\s+)?(?:openstreetmap|osm)(?:\s+for)?\s*:?\s+(.+)$/i],
+    ['places', /^(?:find|search|look up)\s+(.+?)\s+(?:on|in|using)\s+(?:openstreetmap|osm)$/i],
+    ['ip', /^(?:ip(?:\s+lookup)?|look up ip|lookup ip|ipwho\.is)\s*:?\s+([\da-f:.]+)$/i],
+    ['currency', /^(?:exchange rates?(?:\s+for)?|currency|frankfurter)\s*:?\s+([a-z]{3})$/i],
+  ];
+  for (const [tool, pattern] of patterns) {
+    const match = query.match(pattern);
+    if (match?.[1]?.trim()) return { tool, query: match[1].trim().slice(0, 300) };
+  }
+  return null;
+}
+
 export async function planTool(
   base: ModelSession,
   query: string,
   signal: AbortSignal,
-): Promise<{ tool: ToolId; query: string } | null> {
-  const session = await base.clone({ signal });
+): Promise<ToolRequest | null> {
+  const fallback = detectToolRequest(query);
+  let session: ModelSession | undefined;
   try {
+    session = await base.clone({ signal });
     const text = await session.prompt(
       `Choose at most one public tool for the user's request. Return ONLY JSON: {"tool":"none|wikipedia|github|places|weather|ip|currency","query":"short search query"}.
-Tools: wikipedia for encyclopedia facts; github for finding public repositories; places for finding a named place on OpenStreetMap; weather for a city forecast (query must be city name only); ip for an explicit IPv4 or IPv6 address (query must be address only); currency for exchange rates (query must be a 3-letter currency code, e.g. USD). Use none for writing, coding, reasoning or casual conversation. Do not invent an IP address or location. User request: ${JSON.stringify(query.slice(0, 4000))}`,
-      { signal },
+Tools: wikipedia for encyclopedia facts; github for finding public repositories; places for finding a named place on OpenStreetMap; weather for a city forecast (query must be city name only); ip for an explicit IPv4 or IPv6 address (query must be address only); currency for exchange rates (query must be a 3-letter currency code, e.g. USD). Choose the named provider when the user asks to use it. Use none for writing, coding, reasoning or casual conversation. Do not invent an IP address or location.
+Examples:
+"What's the weather in Vancouver?" -> {"tool":"weather","query":"Vancouver"}
+"Search GitHub for React chat apps" -> {"tool":"github","query":"React chat apps"}
+"Look up octopuses on Wikipedia" -> {"tool":"wikipedia","query":"octopuses"}
+"Write a poem about GitHub" -> {"tool":"none","query":""}
+User request: ${JSON.stringify(query.slice(0, 4000))}`,
+      {
+        signal,
+        responseConstraint: {
+          type: 'object',
+          properties: {
+            tool: {
+              type: 'string',
+              enum: ['none', 'wikipedia', 'github', 'places', 'weather', 'ip', 'currency'],
+            },
+            query: { type: 'string' },
+          },
+          required: ['tool', 'query'],
+          additionalProperties: false,
+        },
+      },
     );
     const parsed: unknown = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object') return fallback;
     const { tool, query: search } = parsed as { tool?: string; query?: string };
     if (
       ['wikipedia', 'github', 'places', 'weather', 'ip', 'currency'].includes(tool || '') &&
@@ -42,12 +105,12 @@ Tools: wikipedia for encyclopedia facts; github for finding public repositories;
     ) {
       return { tool: tool as ToolId, query: search.slice(0, 300) };
     }
-    return null;
+    return fallback;
   } catch (error) {
     if (signal.aborted) throw error;
-    return null; // A tiny model may fail to produce JSON. Normal chat still works.
+    return fallback; // Explicit provider requests still work if the model cannot produce a plan.
   } finally {
-    session.destroy();
+    session?.destroy();
   }
 }
 

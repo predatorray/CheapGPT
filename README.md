@@ -19,7 +19,7 @@ npm run preview
 
 ## Local AI
 
-Open **Set up local AI → Enable local AI**. Model creation is always an explicit user action: the initial model download can be several gigabytes. Actual availability depends on browser version, OS, hardware, region, available storage, and the browser's rollout or experimental settings. Use HTTPS in production; `localhost` is suitable for development. See [Chrome's Prompt API guide](https://developer.chrome.com/docs/ai/prompt-api) for current requirements and setup instructions.
+Start typing in the centered composer and send a message. The first prompt automatically starts the local model, without a setup dialog; the conversation shows download progress and continues with your original prompt when ready. The initial model download can be several gigabytes. Stop cancels setup as well as generation, and another message retries a failed or cancelled setup. No model is downloaded on page load. Actual availability depends on browser version, OS, hardware, region, available storage, and the browser's rollout or experimental settings. Use HTTPS in production; `localhost` is suitable for development. See [Chrome's Prompt API guide](https://developer.chrome.com/docs/ai/prompt-api) for current requirements and setup instructions.
 
 The app feature-detects `window.LanguageModel` and calls `availability()` with English text inputs and outputs. It creates a system-prompt session, clones it per turn, and streams text deltas via `promptStreaming()`. Only a bounded recent history goes into each turn. Cloned sessions are destroyed after use; Stop cancels the active operation. Switching conversations cannot leak another chat's model context. English is the explicitly supported model language. Other browsers work when they expose this API and support the requested configuration.
 
@@ -27,7 +27,7 @@ Unsupported browsers show setup guidance, rather than invented AI replies. The e
 
 ## A few free tools
 
-Choose a tool in the composer, then enter its search term. **Auto tools** lets the local model choose one tool and a query before composing an answer; malformed plans fall back to ordinary chat. Source cards always show the actual returned facts alongside generated answers.
+**Auto tools is enabled by default.** Ask naturally, for example “What's the weather in Vancouver?” or “Search GitHub for React chat apps”. The local model chooses one tool and its query using a constrained JSON plan. If planning fails or local AI is unavailable, conservative patterns still handle explicit provider requests. General writing, coding, and casual chat stay local. Choose **Just chat** to disable all automatic tool requests, or select a specific tool for an exact lookup using the inputs below. Source cards show the returned facts alongside generated answers.
 
 | Tool           | Example input             | Public service / limits                                                                                                  |
 | -------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |

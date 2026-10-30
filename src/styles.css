@@ -1189,6 +1189,59 @@ h1 > span {
     display: none;
   }
 }
+.chat-layout.empty-chat {
+  width: min(740px, calc(100% - 64px));
+  padding: 0 0 78px;
+}
+.minimal-welcome {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.minimal-welcome h1 {
+  margin: 0;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 500;
+  letter-spacing: -1px;
+  line-height: 1.3;
+}
+.empty-chat .composer {
+  padding: 18px 16px 12px;
+}
+.empty-chat .composer textarea {
+  min-height: 28px;
+}
+.empty-chat .composer-toolbar {
+  margin-top: 14px;
+}
+.model-download {
+  max-width: 580px;
+  padding: 18px;
+  margin-bottom: 22px;
+  border: 1px solid #dce5d1;
+  background: #f0f4e9;
+  border-radius: 12px;
+  color: #516646;
+}
+.model-download strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.model-download p {
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 8px 0 15px;
+  color: #68795b;
+}
+@media (max-width: 760px) {
+  .chat-layout.empty-chat {
+    width: calc(100% - 36px);
+    padding-bottom: 64px;
+  }
+  .minimal-welcome {
+    margin-bottom: 24px;
+  }
+}
+
 /* Keep the quiet palette legible on warm white. */
 .hero-subtitle {
   color: #707963;

@@ -55,6 +55,7 @@ export interface ModelFactory {
     options?: object,
   ): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
   create(options?: {
+    signal?: AbortSignal;
     initialPrompts?: Prompt[];
     expectedInputs?: { type: 'text'; languages: string[] }[];
     expectedOutputs?: { type: 'text'; languages: string[] }[];

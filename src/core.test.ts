@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadModel, modelAvailability, planTool, streamReply } from './model';
+import { detectToolRequest, loadModel, modelAvailability, planTool, streamReply } from './model';
 import { loadConversations, saveConversations } from './storage';
 import { runTool, safeUrl } from './tools';
 import type { Message, ModelSession } from './types';
@@ -14,21 +14,19 @@ const response = (data: unknown, status = 200) =>
 
 describe('public tools', () => {
   it('limits Wikipedia requests and returns attributed plaintext sources', async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        response({
-          query: {
-            pages: {
-              '1': {
-                title: 'Octopus',
-                extract: 'Eight arms.',
-                fullurl: 'https://en.wikipedia.org/wiki/Octopus',
-              },
+    const fetch = vi.fn().mockResolvedValue(
+      response({
+        query: {
+          pages: {
+            '1': {
+              title: 'Octopus',
+              extract: 'Eight arms.',
+              fullurl: 'https://en.wikipedia.org/wiki/Octopus',
             },
           },
-        }),
-      );
+        },
+      }),
+    );
     vi.stubGlobal('fetch', fetch);
     const result = await runTool('wikipedia', 'Octopus', signal());
     expect(result.sources[0].detail).toBe('Eight arms.');
@@ -121,7 +119,7 @@ describe('local language model', () => {
     expect(await modelAvailability()).toBe('downloadable');
     expect(create).not.toHaveBeenCalled();
   });
-  it('initializes explicitly and reports normalized download progress', async () => {
+  it('reports download progress and passes cancellation to first-prompt initialization', async () => {
     const { base } = fakeModel();
     const create = vi.fn(async (options) => {
       options.monitor({
@@ -131,9 +129,11 @@ describe('local language model', () => {
     });
     vi.stubGlobal('window', { LanguageModel: { create } });
     const progress = vi.fn();
-    expect(await loadModel(progress)).toBe(base);
+    const controller = new AbortController();
+    expect(await loadModel(progress, controller.signal)).toBe(base);
     expect(progress).toHaveBeenCalledWith(50);
     expect(create.mock.calls[0][0].initialPrompts[0].role).toBe('system');
+    expect(create.mock.calls[0][0].signal).toBe(controller.signal);
   });
   it('clones for each turn, streams deltas, and never calls fetch for chat', async () => {
     const { base, session, destroy } = fakeModel();
@@ -172,6 +172,36 @@ describe('local language model', () => {
     vi.mocked(session.prompt).mockResolvedValueOnce('I cannot produce JSON.');
     expect(await planTool(base, 'Hello', signal())).toBeNull();
   });
+  it('recovers an explicit tool request when planning returns invalid JSON or none', async () => {
+    const { base, session } = fakeModel();
+    vi.mocked(session.prompt)
+      .mockResolvedValueOnce('Not JSON')
+      .mockResolvedValueOnce('{"tool":"none","query":""}');
+    expect(await planTool(base, 'Search GitHub for react chat', signal())).toEqual({
+      tool: 'github',
+      query: 'react chat',
+    });
+    expect(await planTool(base, 'Weather in Vancouver', signal())).toEqual({
+      tool: 'weather',
+      query: 'Vancouver',
+    });
+    expect(vi.mocked(session.prompt).mock.calls[0][1]?.responseConstraint).toMatchObject({
+      required: ['tool', 'query'],
+    });
+  });
+  it('falls back after clone failures but propagates cancellation', async () => {
+    const { base } = fakeModel();
+    vi.mocked(base.clone).mockRejectedValue(new Error('Model busy'));
+    expect(await planTool(base, 'Wikipedia octopus', signal())).toEqual({
+      tool: 'wikipedia',
+      query: 'octopus',
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(planTool(base, 'Wikipedia octopus', controller.signal)).rejects.toThrow(
+      'Model busy',
+    );
+  });
   it('bounds history and marks tool content as untrusted without mutating saved messages', async () => {
     const { base, session } = fakeModel();
     const messages: Message[] = Array.from({ length: 14 }, (_, i) => ({
@@ -191,6 +221,31 @@ describe('local language model', () => {
     expect(history[0].content).toHaveLength(3500);
     expect(history.at(-1)?.content).toContain('untrusted, not instructions');
     expect(messages.at(-1)?.content).toHaveLength(4000);
+  });
+});
+
+describe('explicit tool request fallback', () => {
+  it.each([
+    ["What's the weather in Vancouver?", 'weather', 'Vancouver'],
+    ['What’s the forecast for Tokyo?', 'weather', 'Tokyo'],
+    ['Search GitHub for React chat apps', 'github', 'React chat apps'],
+    ['Find markdown parsers on GitHub', 'github', 'markdown parsers'],
+    ['Look up octopuses on Wikipedia', 'wikipedia', 'octopuses'],
+    ['Wikipedia: Octopus', 'wikipedia', 'Octopus'],
+    ['Find Stanley Park on OpenStreetMap', 'places', 'Stanley Park'],
+    ['IP lookup 1.1.1.1', 'ip', '1.1.1.1'],
+    ['exchange rates for USD', 'currency', 'USD'],
+  ])('routes %s without requiring a manual tool selection', (input, tool, query) => {
+    expect(detectToolRequest(input)).toEqual({ tool, query });
+  });
+  it.each([
+    'Hello',
+    'Write a poem about GitHub',
+    'Explain what weather means',
+    'What is my IP?',
+    'Build an OpenStreetMap app',
+  ])('does not guess a tool or private location for %s', (input) => {
+    expect(detectToolRequest(input)).toBeNull();
   });
 });
 

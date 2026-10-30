@@ -34,14 +34,12 @@ import {
   InfoOutlined,
   LanguageRounded,
   MenuRounded,
-  NorthEastRounded,
   OpenInNewRounded,
   SearchRounded,
   SettingsOutlined,
   StopRounded,
   WbSunnyOutlined,
   AccountBalanceWalletOutlined,
-  TerminalRounded,
   TravelExploreRounded,
   TuneRounded,
   PublicRounded,
@@ -49,7 +47,7 @@ import {
 } from '@mui/icons-material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { loadModel, modelAvailability, planTool, streamReply } from './model';
+import { detectToolRequest, loadModel, modelAvailability, planTool, streamReply } from './model';
 import { loadConversations, saveConversations } from './storage';
 import { runTool, safeUrl, toolInfo } from './tools';
 import type {
@@ -106,7 +104,7 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState('');
-  const [tool, setTool] = useState<ToolChoice>('none');
+  const [tool, setTool] = useState<ToolChoice>('auto');
   const [toolsAnchor, setToolsAnchor] = useState<HTMLElement | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const [drawer, setDrawer] = useState(false);
@@ -143,10 +141,13 @@ export default function App() {
     let mounted = true;
     modelAvailability()
       ?.then((s) => {
-        if (mounted) setStatus(s === 'downloading' ? 'downloadable' : s);
+        if (mounted)
+          setStatus((current) =>
+            current === 'checking' ? (s === 'downloading' ? 'downloadable' : s) : current,
+          );
       })
       .catch(() => {
-        if (mounted) setStatus('error');
+        if (mounted) setStatus((current) => (current === 'checking' ? 'error' : current));
       });
     if (!window.LanguageModel) setStatus('unsupported');
     return () => {
@@ -178,24 +179,32 @@ export default function App() {
     [],
   );
 
-  async function initialize() {
-    if (status === 'downloading') return;
+  async function initialize(signal: AbortSignal) {
     setStatus('downloading');
     setModelError('');
     setProgress(0);
     try {
-      base.current?.destroy();
-      base.current = await loadModel(setProgress);
+      // Called directly from Send, before any await, to preserve browser user activation.
+      const session = await loadModel(setProgress, signal);
+      if (signal.aborted) {
+        session.destroy();
+        signal.throwIfAborted();
+      }
+      base.current = session;
       setStatus('ready');
+      return session;
     } catch (error) {
-      setStatus('error');
-      setModelError(error instanceof Error ? error.message : 'The local model could not start.');
+      setStatus(signal.aborted ? 'downloadable' : 'error');
+      if (!signal.aborted)
+        setModelError(error instanceof Error ? error.message : 'The local model could not start.');
+      throw error;
     }
   }
   function newChat() {
     if (busy) return;
     setActiveId(null);
     setInput('');
+    setTool('auto');
     setDrawer(false);
     textarea.current?.focus();
   }
@@ -210,11 +219,7 @@ export default function App() {
   }
   async function send() {
     const prompt = input.trim();
-    if (!prompt || busy) return;
-    if (!base.current && !isConcreteTool) {
-      setSettings(true);
-      return;
-    }
+    if (!prompt || busy || controller.current) return;
     const chatId = activeId || id();
     const user: Message = { id: id(), role: 'user', content: prompt };
     const assistant: Message = { id: id(), role: 'assistant', content: '' };
@@ -247,12 +252,25 @@ export default function App() {
     let content = '';
     let result: ToolResult | undefined;
     try {
+      let model = base.current;
+      let startupError = '';
+      if (!model && window.LanguageModel && !needsHttps && status !== 'unavailable') {
+        setPhase('Acquiring a few brain cells');
+        try {
+          model = await initialize(abort.signal);
+        } catch (error) {
+          if (abort.signal.aborted) throw error;
+          startupError =
+            error instanceof Error ? error.message : 'The local model could not start.';
+        }
+      }
+      abort.signal.throwIfAborted();
       let request: { tool: ToolId; query: string } | null = isConcreteTool
         ? { tool: tool as ToolId, query: prompt }
         : null;
-      if (tool === 'auto' && base.current) {
+      if (tool === 'auto') {
         setPhase('Negotiating with the tool department');
-        request = await planTool(base.current, prompt, abort.signal);
+        request = model ? await planTool(model, prompt, abort.signal) : detectToolRequest(prompt);
       }
       if (request) {
         setPhase(`Borrowing facts from ${toolInfo.find((t) => t.id === request!.tool)?.name}`);
@@ -261,8 +279,8 @@ export default function App() {
       }
       abort.signal.throwIfAborted();
       setPhase('');
-      if (base.current) {
-        await streamReply(base.current, history, result, abort.signal, (chunk) => {
+      if (model) {
+        await streamReply(model, history, result, abort.signal, (chunk) => {
           content += chunk;
           updateMessage(chatId, assistant.id, { content });
         });
@@ -270,8 +288,17 @@ export default function App() {
           throw new Error(
             'The model returned an empty response. Even our confidence has limits. Try again.',
           );
+      } else if (result) {
+        content = `${result.summary}\n\nLocal AI is off, so here are the facts straight from the source. No creative accounting.`;
       } else {
-        content = `${result!.summary}\n\nLocal AI is off, so here are the facts straight from the source. No creative accounting.`;
+        throw new Error(
+          startupError ||
+            (needsHttps
+              ? `Local AI needs HTTPS. [Open the secure version](${window.location.href.replace(/^http:/, 'https:')}) to use your browser’s model.`
+              : status === 'unavailable'
+                ? 'Your browser reports that its local model is unavailable on this device. Check browser support and hardware requirements.'
+                : 'This browser does not expose the LanguageModel API. Try an eligible desktop Chrome or Chromium browser.'),
+        );
       }
       updateMessage(chatId, assistant.id, {
         content,
@@ -290,7 +317,7 @@ export default function App() {
             content ||
             (result
               ? `${result.summary}\n\nThe local model stumbled, but the source results are below.`
-              : `Well, that was ambitious. ${error instanceof Error ? error.message : 'Something went wrong.'} If a public tool failed, its service may be busy or may not allow browser requests.`),
+              : `Well, that was ambitious. ${error instanceof Error ? error.message : 'Something went wrong.'} ${!window.LanguageModel || needsHttps || status === 'unavailable' ? 'Public tools still work: try “Weather in Vancouver” or choose a tool from the menu.' : 'Try sending another message.'}`),
           error: true,
           elapsed: (performance.now() - start) / 1000,
         });
@@ -300,11 +327,6 @@ export default function App() {
       controller.current = null;
       textarea.current?.focus();
     }
-  }
-  function selectSuggestion(nextTool: ToolChoice, prompt: string) {
-    setTool(nextTool);
-    setInput(prompt);
-    textarea.current?.focus();
   }
   async function copy(text: string) {
     try {
@@ -521,68 +543,10 @@ export default function App() {
             </div>
           </MenuItem>
         </Menu>
-        <div className={`chat-layout ${messages.length ? 'has-messages' : ''}`}>
+        <div className={`chat-layout ${messages.length ? 'has-messages' : 'empty-chat'}`}>
           {!messages.length ? (
-            <section className="welcome">
-              <div className="eyebrow">
-                <span /> INTELLIGENCE ON A BUDGET
-              </div>
-              <div className="hero-coin">
-                <Coin />
-                <span className="spark spark-one">✧</span>
-                <span className="spark spark-two">✦</span>
-              </div>
-              <h1>
-                Big ideas.
-                <br />
-                <span>Tiny budget.</span>
-              </h1>
-              <p className="hero-subtitle">
-                Meet your slightly underqualified AI assistant.
-                <br />
-                All the confidence. None of the subscription.
-              </p>
-              <div className="suggestions">
-                <button
-                  onClick={() =>
-                    selectSuggestion(
-                      'none',
-                      'Explain quantum computing like I’m five. Keep it short and use an everyday analogy.',
-                    )
-                  }
-                >
-                  <span className="suggestion-icon sage">
-                    <AutoAwesomeOutlined />
-                  </span>
-                  <strong>Explain something</strong>
-                  <span>Make the complicated less so.</span>
-                  <NorthEastRounded className="suggestion-arrow" />
-                </button>
-                <button onClick={() => selectSuggestion('github', 'react markdown')}>
-                  <span className="suggestion-icon lavender">
-                    <TerminalRounded />
-                  </span>
-                  <strong>Find some code</strong>
-                  <span>Stand on the shoulders of devs.</span>
-                  <NorthEastRounded className="suggestion-arrow" />
-                </button>
-                <button onClick={() => selectSuggestion('weather', 'Vancouver')}>
-                  <span className="suggestion-icon peach">
-                    <WbSunnyOutlined />
-                  </span>
-                  <strong>Check the weather</strong>
-                  <span>A very small talk starter.</span>
-                  <NorthEastRounded className="suggestion-arrow" />
-                </button>
-                <button onClick={() => selectSuggestion('wikipedia', 'Octopus')}>
-                  <span className="suggestion-icon blue">
-                    <LanguageRounded />
-                  </span>
-                  <strong>Fall down a rabbit hole</strong>
-                  <span>Wikipedia knows. I’ll paraphrase.</span>
-                  <NorthEastRounded className="suggestion-arrow" />
-                </button>
-              </div>
+            <section className="minimal-welcome">
+              <h1>What can I help with?</h1>
             </section>
           ) : (
             <section className="messages" aria-label="Conversation">
@@ -667,7 +631,24 @@ export default function App() {
                   )}
                 </article>
               ))}
-              {busy && (
+              {busy && status === 'downloading' && (
+                <div className="model-download" role="status">
+                  <strong>
+                    Downloading a few brain cells… {progress > 0 ? `${progress}%` : ''}
+                  </strong>
+                  <p>
+                    Your browser is preparing its local model. The first download can be several
+                    gigabytes. Your message is queued; we’ll answer as soon as the tiny brain is
+                    ready.
+                  </p>
+                  <LinearProgress
+                    variant={progress > 0 ? 'determinate' : 'indeterminate'}
+                    value={progress}
+                    aria-label="Local model download progress"
+                  />
+                </div>
+              )}
+              {busy && status !== 'downloading' && (
                 <div className="thinking" role="status">
                   <span className="thinking-dots">
                     <i />
@@ -682,12 +663,6 @@ export default function App() {
             </section>
           )}
           <div className="composer-area">
-            {!messages.length && (
-              <div className="composer-intro">
-                <span>A blank page. Dangerously affordable possibilities.</span>
-                <span>↙ start here</span>
-              </div>
-            )}
             <form
               className="composer"
               onSubmit={(e) => {
@@ -704,7 +679,7 @@ export default function App() {
                     : 'Ask anything. Expect… something.'
                 }
                 value={input}
-                rows={2}
+                rows={messages.length ? 2 : 1}
                 maxLength={12000}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -802,7 +777,7 @@ export default function App() {
                 <InfoOutlined fontSize="small" sx={{ mr: 1.5 }} /> What gets sent to tools?
               </MenuItem>
             </Menu>
-            {status !== 'ready' && (
+            {messages.length > 0 && !busy && status !== 'ready' && (
               <div className="setup-hint">
                 <span className="status-dot" />
                 <span>
@@ -812,14 +787,16 @@ export default function App() {
                       ? 'This tool works without a local model.'
                       : needsHttps
                         ? 'Local AI needs a secure HTTPS connection.'
-                        : 'A tiny brain needs a compatible browser.'}
+                        : status === 'downloadable' || status === 'available' || status === 'error'
+                          ? 'Local AI starts with your next message.'
+                          : 'A tiny brain needs a compatible browser.'}
                 </span>
                 <button onClick={() => setSettings(true)}>
                   {isConcreteTool
                     ? 'About local AI'
                     : status === 'downloading'
                       ? 'View progress'
-                      : 'Set up local AI'}
+                      : 'Browser support'}
                   <ChevronRightRounded />
                 </button>
               </div>
@@ -830,16 +807,6 @@ export default function App() {
             </p>
           </div>
         </div>
-        {!messages.length && (
-          <footer className="page-footer">
-            <span>
-              <span className="footer-star">✳</span> Small model. Big confidence.
-            </span>
-            <button onClick={() => setToolGuide(true)}>
-              Powered by your browser & a little optimism <NorthEastRounded />
-            </button>
-          </footer>
-        )}
       </main>
       <Dialog open={settings} onClose={() => setSettings(false)} fullWidth maxWidth="sm">
         <DialogTitle className="dialog-title">
@@ -880,20 +847,11 @@ export default function App() {
                   compatible hardware, free disk space, and an internet connection for that
                   download. Chat inference then runs locally.
                 </p>
-                <Button
-                  variant="contained"
-                  startIcon={
-                    status === 'downloading' ? (
-                      <CircularProgress color="inherit" size={16} />
-                    ) : (
-                      <DownloadRounded />
-                    )
-                  }
-                  onClick={() => void initialize()}
-                  disabled={status === 'checking' || status === 'downloading'}
-                >
-                  {status === 'downloading' ? 'Acquiring some brain cells…' : 'Enable local AI'}
-                </Button>
+                <p>
+                  Send your first message to start the local model automatically. Download progress
+                  appears right in the conversation. No extra setup dialog, no surprise
+                  subscription.
+                </p>
                 {status === 'downloading' && (
                   <LinearProgress
                     variant={progress > 0 ? 'determinate' : 'indeterminate'}
@@ -975,8 +933,9 @@ export default function App() {
         <DialogContent>
           <p>
             “Just chat” sends no prompts to any service. Selecting a tool sends your search text to
-            that provider, which also sees your IP address. Auto tools uses local AI to choose one
-            tool and its query. The full conversation is never sent to a tool.
+            that provider, which also sees your IP address. Auto tools is on by default: local AI
+            chooses a tool when useful, with a fallback for explicit requests such as “weather in
+            Vancouver” if AI is unavailable. The full conversation is never sent to a tool.
           </p>
           <p>
             Choose a tool for an exact lookup, even without AI. No keys, accounts, or paid services.
