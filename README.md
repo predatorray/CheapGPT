@@ -57,6 +57,12 @@ In **Just chat**, no prompt or conversation is sent to a server. Tools send thei
 
 Currency conversions such as **“Convert 1 USD to CAD”** use a local extraction tool to produce `{ amount: 1, from: "USD", to: "CAD" }`, then fetch base-currency reference rates and calculate the answer in TypeScript. Explicit conversions bypass model planning so a small model cannot drop the amount or destination code. This works in Auto mode, with Exchange rates manually selected, and without local AI. The source card includes the calculation, rate date, and rounded result. Enter explicit three-letter codes; ambiguous symbols and missing parameters are not guessed. A bare code such as `USD` still shows reference rates.
 
+## Read a website
+
+Paste a URL or ask **“Read https://example.com/”** / **“Summarize https://example.com/”** in Auto mode, or select **Read website**. The tool fetches HTML/plain text directly, omits credentials and referrer information, extracts up to 8,000 characters, and passes the fetched text to the local model. Without a model, the text is shown in a source card. No remote scripts, images, or frames are loaded, and links open in a separate tab rather than navigating away from your conversation.
+
+Most websites do not allow browser cross-origin reads (**CORS**). Regional restrictions, sign-in, mixed-content policies, and outages can also prevent access. A readable HTTP error is reported when available; otherwise the browser does not reveal the exact cause. CheapGPT shows an explanation and an original-site link, without generating a summary of missing content or using a proxy to bypass restrictions. JavaScript-rendered pages, authenticated content, PDFs, and other downloads are not supported. Requests time out after 15 seconds, and response bodies are limited to 1 MB. Website integration tests include actual browser CORS enforcement against a second local origin.
+
 ## Conversations
 
 History is stored in this browser's `localStorage`, with up to 50 conversations. It supports search, deletion, switching chats, Markdown export, and response copying. **Remember conversations** can disable persistence; **Delete all chats** clears it. Browser storage is not encrypted and clearing site data deletes history. Incomplete streamed responses may survive a reload as partial text. No server storage or account is involved.

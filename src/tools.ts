@@ -1,5 +1,6 @@
 import type { ToolId, ToolResult } from './types';
 import { calculateCurrencyConversion, extractCurrencyConversion } from './currency';
+import { readWebsite } from './website';
 
 export const toolInfo: {
   id: ToolId;
@@ -10,6 +11,16 @@ export const toolInfo: {
   url: string;
   quota: string;
 }[] = [
+  {
+    id: 'website',
+    name: 'Read website',
+    description: 'Read a link, if the internet cooperates',
+    placeholder: 'Read https://example.com/',
+    provider: 'The website you request',
+    url: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS',
+    quota:
+      'Direct browser requests; sites must allow CORS. Regional restrictions and sign-in may block access. HTML/text only, 1 MB limit, 15-second timeout. No proxy.',
+  },
   {
     id: 'wikipedia',
     name: 'Wikipedia',
@@ -102,6 +113,8 @@ export async function runTool(
   input: string,
   signal: AbortSignal,
 ): Promise<ToolResult> {
+  signal.throwIfAborted();
+  if (tool === 'website') return readWebsite(input, signal);
   const query = input.trim().slice(0, 300);
   if (!query) throw new Error('Give this tool something to look up first.');
   signal.throwIfAborted();

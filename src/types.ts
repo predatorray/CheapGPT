@@ -1,4 +1,4 @@
-export type ToolId = 'wikipedia' | 'github' | 'places' | 'weather' | 'ip' | 'currency';
+export type ToolId = 'wikipedia' | 'github' | 'places' | 'weather' | 'ip' | 'currency' | 'website';
 export type ToolChoice = 'none' | 'auto' | ToolId;
 export interface Source {
   title: string;
@@ -7,6 +7,7 @@ export interface Source {
   location?: { latitude: number; longitude: number };
 }
 export interface ToolResult {
+  unavailable?: boolean;
   tool: ToolId;
   summary: string;
   sources: Source[];

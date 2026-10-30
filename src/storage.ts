@@ -4,7 +4,9 @@ function validResult(data: unknown): data is ToolResult {
   if (!data || typeof data !== 'object') return false;
   const result = data as Record<string, unknown>;
   return (
-    ['wikipedia', 'github', 'places', 'weather', 'ip', 'currency'].includes(String(result.tool)) &&
+    ['wikipedia', 'github', 'places', 'weather', 'ip', 'currency', 'website'].includes(
+      String(result.tool),
+    ) &&
     typeof result.summary === 'string' &&
     Array.isArray(result.sources) &&
     result.sources.every((s: unknown) => {
