@@ -359,7 +359,7 @@ export default function App() {
       }
       abort.signal.throwIfAborted();
       setPhase('');
-      if (result?.unavailable) {
+      if (result?.unavailable || result?.tool === 'ip') {
         content = result.summary;
       } else if (model) {
         await streamReply(model, history, result, abort.signal, (chunk) => {
@@ -1042,7 +1042,7 @@ export default function App() {
           ))}
           <p className="credits">
             Tool results are cached for five minutes in memory. For weather and IP lookups, enter an
-            explicit city or address; we never request device geolocation. No analytics or tracking
+            an explicit city or IP address, or ask for your own public IP. Caller-IP detection runs only when requested and is not cached; we never request device geolocation. No analytics or tracking
             scripts.
           </p>
         </DialogContent>

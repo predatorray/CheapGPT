@@ -46,7 +46,7 @@ describe('public tools', () => {
   it('requires an explicit valid address before making an IP lookup', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    for (const query of ['my ip', '999.1.1.1', 'https://example.com', '../secret'])
+    for (const query of ['999.1.1.1', 'https://example.com', '../secret'])
       await expect(runTool('ip', query, signal())).rejects.toThrow('explicit');
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -242,7 +242,6 @@ describe('explicit tool request fallback', () => {
     'Hello',
     'Write a poem about GitHub',
     'Explain what weather means',
-    'What is my IP?',
     'Build an OpenStreetMap app',
   ])('does not guess a tool or private location for %s', (input) => {
     expect(detectToolRequest(input)).toBeNull();

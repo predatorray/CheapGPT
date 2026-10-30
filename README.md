@@ -46,7 +46,7 @@ Unsupported browsers show setup guidance, rather than invented AI replies. The e
 | GitHub         | `react markdown`          | Public repository search. Usually 60 unauthenticated requests/hour and 10 search requests/minute per IP.                 |
 | OpenStreetMap  | `Stanley Park, Vancouver` | Nominatim, manual searches only, maximum 1 request/second per browser. © OpenStreetMap contributors (ODbL).              |
 | Weather        | `Vancouver`               | Open-Meteo and GeoNames, 3-day forecast in °C. CC BY 4.0, non-commercial free tier, 10,000 calls/day.                    |
-| IP lookup      | `1.1.1.1`                 | ipwho.is, explicit address only. Non-commercial free endpoint, 60 requests/minute; free-tier CORS availability may vary. |
+| IP lookup      | `1.1.1.1`                 | ipwho.is, explicit address or user-requested public-IP detection. Non-commercial free endpoint, 60 requests/minute; free-tier CORS availability may vary. |
 | Exchange rates | `USD`                     | Frankfurter daily reference rates, no key. Not live market or stock prices.                                              |
 
 OpenStreetMap place results include an interactive, lazy-loaded map in the conversation, with a marker, pan/zoom controls, attribution, and a place link for opening the full map. Map embeds contact OpenStreetMap separately from the Nominatim search; saved chats retain the coordinates. Older saved results without coordinates continue to show links.
@@ -88,3 +88,7 @@ An independent parody project, not affiliated with OpenAI or ChatGPT. Small mode
 History starts with the first message as a fallback. Once the local model is ready, a short title is generated after eight idle seconds. Title work uses a small context, is cancelled when you send a message, and times out after a minute. It runs only at completed-round checkpoints 1, 4, and 7; an unchanged topic freezes the title early. Titles stop updating after round 7.
 
 Ask “Rename this conversation to Garden plans” to use the local `rename_conversation` tool. Auto tools also exposes this action to the model planner. A rename permanently disables automatic titles for that conversation, including after reloading saved history. No conversation data leaves the device for naming.
+
+### Your public IP
+
+Ask **“What’s my IP address?”** in Auto mode, or select IP lookup and enter “my IP”. CheapGPT requests **https://ipwho.is/** without an address parameter, so the service detects the browser’s public egress IP. Explicit address lookups still use `/ADDRESS`. Current-IP requests bypass model planning and both app/browser caches. The answer displays the service response directly, so the model cannot replace it with an example such as 1.1.1.1. No IP request runs on page load. VPNs/proxies can change the public IP, and IP geolocation is approximate. CORS or service failures produce an error, not an invented IP.

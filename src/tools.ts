@@ -1,6 +1,7 @@
 import type { ToolId, ToolResult } from './types';
 import { calculateCurrencyConversion, extractCurrencyConversion } from './currency';
 import { readWebsite } from './website';
+import { CURRENT_IP_QUERY, isCurrentIpRequest } from './ip';
 
 export const toolInfo: {
   id: ToolId;
@@ -61,7 +62,7 @@ export const toolInfo: {
     id: 'ip',
     name: 'IP lookup',
     description: 'An address. A very rough location.',
-    placeholder: 'An IP address, e.g. 1.1.1.1',
+    placeholder: 'What’s my IP address? Or enter an explicit IPv4/IPv6 address',
     provider: 'ipwho.is',
     url: 'https://ipwhois.io/documentation',
     quota: 'Free non-commercial endpoint: 60 requests/minute. Browser CORS availability may vary.',
@@ -78,12 +79,14 @@ export const toolInfo: {
 ];
 
 const cache = new Map<string, { time: number; data: unknown }>();
-async function json<T>(url: string, signal: AbortSignal): Promise<T> {
-  const cached = cache.get(url);
+async function json<T>(url: string, signal: AbortSignal, cacheResponse = true): Promise<T> {
+  const cached = cacheResponse ? cache.get(url) : undefined;
   if (cached && Date.now() - cached.time < 300_000) return cached.data as T;
   const response = await fetch(url, {
     signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
     referrerPolicy: 'strict-origin-when-cross-origin',
+    cache: cacheResponse ? 'default' : 'no-store',
+    credentials: 'omit',
   });
   if (!response.ok)
     throw new Error(
@@ -93,7 +96,7 @@ async function json<T>(url: string, signal: AbortSignal): Promise<T> {
     );
   const data: unknown = await response.json();
   if (cache.size > 100) cache.clear();
-  cache.set(url, { time: Date.now(), data });
+  if (cacheResponse) cache.set(url, { time: Date.now(), data });
   return data as T;
 }
 const url = (base: string, params: Record<string, string>) =>
@@ -265,13 +268,14 @@ export async function runTool(
     };
   }
   if (tool === 'ip') {
-    // Explicit addresses only: never silently disclose a visitor's own IP to a lookup service.
+    // Caller-IP detection is only requested by an explicit user request, never on page load.
+    const current = query.toLowerCase() === CURRENT_IP_QUERY || isCurrentIpRequest(query);
     const v4 =
       /^(\d{1,3}\.){3}\d{1,3}$/.test(query) && query.split('.').every((n) => Number(n) <= 255);
     const v6 = query.includes(':') && /^[0-9a-f:]+$/i.test(query) && query.length <= 39;
-    if (!v4 && !v6)
+    if (!current && !v4 && !v6)
       throw new Error(
-        'Enter an explicit IPv4 or IPv6 address. We never look up your own IP automatically.',
+        'Enter an explicit IPv4 or IPv6 address, or ask “What’s my IP address?”.',
       );
     const data = await json<{
       success: boolean;
@@ -282,11 +286,14 @@ export async function runTool(
       country: string;
       connection?: { isp: string };
       timezone?: { id: string };
-    }>(`https://ipwho.is/${encodeURIComponent(query)}`, signal);
+    }>(current ? 'https://ipwho.is/' : `https://ipwho.is/${encodeURIComponent(query)}`, signal, !current);
     if (!data.success) throw new Error(data.message || 'This address could not be looked up.');
+    if (typeof data.ip !== 'string' || !data.ip.trim()) throw new Error('The IP service returned no address. No IP address has been guessed.');
     return {
       tool,
-      summary: 'Approximate IP location. This is not a street address.',
+      summary: current
+        ? `Your public IP address, as reported by ipwho.is, is **${data.ip}**. This is the address seen by the service; it may be your VPN or proxy’s exit address. Location information is approximate.`
+        : `IP lookup for **${data.ip}**. Location information is approximate; this is not a street address.`,
       sources: [
         {
           title: data.ip,
