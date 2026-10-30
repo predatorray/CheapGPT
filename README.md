@@ -17,6 +17,17 @@ npm run build
 npm run preview
 ```
 
+Browser integration tests run in real headless Chromium:
+
+```sh
+npx playwright install chromium
+npm run test:integration
+# Or use an existing installed browser:
+CHROMIUM_PATH=/usr/bin/chromium npm run test:integration
+```
+
+The integration tests cover automatic and manually selected currency tools, the API request parameters, conversion arithmetic and rounding, missing rates, the Just chat opt-out, and preservation of conversion parameters when a model is available. Exchange-rate responses are fixed test fixtures; native model generation is either disabled or mocked. Tests do not download an AI model or claim to verify live provider availability. GitHub Actions runs these browser tests before deployment.
+
 ## Local AI
 
 Start typing in the centered composer and send a message. The first prompt automatically starts the local model, without a setup dialog; the conversation shows download progress and continues with your original prompt when ready. The initial model download can be several gigabytes. Stop cancels setup as well as generation, and another message retries a failed or cancelled setup. No model is downloaded on page load. Actual availability depends on browser version, OS, hardware, region, available storage, and the browser's rollout or experimental settings. Use HTTPS in production; `localhost` is suitable for development. See [Chrome's Prompt API guide](https://developer.chrome.com/docs/ai/prompt-api) for current requirements and setup instructions.
@@ -41,6 +52,8 @@ Unsupported browsers show setup guidance, rather than invented AI replies. The e
 Limits and terms can change. Tools do not use a proxy, authentication, autocomplete, tracking, automatic geolocation, or background polling. Provider CORS restrictions, outages, and rate limits are surfaced as failures; no insecure relay is used to bypass them. Requests time out after 15 seconds and successful responses are cached in memory for 5 minutes. Nominatim's limit is per browser: a high-traffic deployment should replace the shared public endpoint with a suitable hosted geocoding provider. Review providers' current terms before commercial use.
 
 In **Just chat**, no prompt or conversation is sent to a server. Tools send their query to the selected provider, which also sees your IP. Auto mode sends a locally generated search query, never the full conversation. Model installation is managed by the browser and can use the network. There are no analytics, remotely loaded fonts, or external image requests from Markdown.
+
+Currency conversions such as **“Convert 1 USD to CAD”** use a local extraction tool to produce `{ amount: 1, from: "USD", to: "CAD" }`, then fetch base-currency reference rates and calculate the answer in TypeScript. Explicit conversions bypass model planning so a small model cannot drop the amount or destination code. This works in Auto mode, with Exchange rates manually selected, and without local AI. The source card includes the calculation, rate date, and rounded result. Enter explicit three-letter codes; ambiguous symbols and missing parameters are not guessed. A bare code such as `USD` still shows reference rates.
 
 ## Conversations
 

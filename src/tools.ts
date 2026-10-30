@@ -1,4 +1,5 @@
 import type { ToolId, ToolResult } from './types';
+import { calculateCurrencyConversion, extractCurrencyConversion } from './currency';
 
 export const toolInfo: {
   id: ToolId;
@@ -58,7 +59,7 @@ export const toolInfo: {
     id: 'currency',
     name: 'Exchange rates',
     description: 'Convert your hypothetical savings',
-    placeholder: 'A base currency, e.g. USD',
+    placeholder: 'Convert 1 USD to CAD, or enter a base currency such as USD',
     provider: 'Frankfurter / institutional reference rates',
     url: 'https://frankfurter.dev/',
     quota: 'No API key; daily reference rates, not live trading prices.',
@@ -281,12 +282,32 @@ export async function runTool(
       ],
     };
   }
-  if (!/^[a-z]{3}$/i.test(query))
-    throw new Error('Enter a three-letter base currency, such as USD, EUR, or GBP.');
+  const conversion = extractCurrencyConversion(query);
+  if (!conversion && !/^[a-z]{3}$/i.test(query))
+    throw new Error(
+      'Enter a three-letter base currency, or a conversion such as “Convert 1 USD to CAD”.',
+    );
   const data = await json<{ base: string; date: string; rates: Record<string, number> }>(
-    url('https://api.frankfurter.dev/v1/latest', { base: query.toUpperCase() }),
+    url('https://api.frankfurter.dev/v1/latest', { base: conversion?.from || query.toUpperCase() }),
     signal,
   );
+  if (conversion) {
+    if (data.base !== conversion.from)
+      throw new Error('The rate provider returned a different base currency. Please try again.');
+    const rate = conversion.from === conversion.to ? 1 : data.rates?.[conversion.to];
+    const answer = calculateCurrencyConversion(conversion, rate);
+    return {
+      tool,
+      summary: `${answer}. Reference rates for ${data.date}.`,
+      sources: [
+        {
+          title: answer,
+          url: 'https://frankfurter.dev/',
+          detail: `Calculated locally: ${conversion.amount} × ${rate} = ${conversion.amount * rate} ${conversion.to}.\nRate: 1 ${conversion.from} = ${rate} ${conversion.to}. As of ${data.date}.\nFrankfurter daily reference rates; rounded to the target currency’s standard minor units. Bank fees and spreads are excluded.`,
+        },
+      ],
+    };
+  }
   return {
     tool,
     summary: `Reference exchange rates for ${data.date}. Your imaginary fortune, in several currencies.`,
