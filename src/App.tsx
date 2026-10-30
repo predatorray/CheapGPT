@@ -64,6 +64,7 @@ import type {
 } from './types';
 
 const toolIcons = {
+  website: <LanguageRounded />,
   wikipedia: <LanguageRounded />,
   github: <GitHub />,
   places: <TravelExploreRounded />,
@@ -357,7 +358,9 @@ export default function App() {
       }
       abort.signal.throwIfAborted();
       setPhase('');
-      if (model) {
+      if (result?.unavailable) {
+        content = result.summary;
+      } else if (model) {
         await streamReply(model, history, result, abort.signal, (chunk) => {
           content += chunk;
           updateMessage(chatId, assistant.id, { content });
