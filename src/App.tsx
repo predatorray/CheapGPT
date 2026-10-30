@@ -108,7 +108,7 @@ export default function App() {
   const [toolsAnchor, setToolsAnchor] = useState<HTMLElement | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const [drawer, setDrawer] = useState(false);
-  const [sidebar, setSidebar] = useState(true);
+  const [sidebar, setSidebar] = useState(false);
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -205,6 +205,7 @@ export default function App() {
     setActiveId(null);
     setInput('');
     setTool('auto');
+    setSidebar(false);
     setDrawer(false);
     textarea.current?.focus();
   }
