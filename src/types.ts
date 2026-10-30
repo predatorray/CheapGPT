@@ -4,6 +4,7 @@ export interface Source {
   title: string;
   url: string;
   detail: string;
+  location?: { latitude: number; longitude: number };
 }
 export interface ToolResult {
   tool: ToolId;

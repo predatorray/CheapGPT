@@ -192,6 +192,7 @@ export async function runTool(
         : 'No places found. Add a city or country to your search.',
       sources: data.map((p) => ({
         title: p.display_name,
+        location: { latitude: Number(p.lat), longitude: Number(p.lon) },
         url: `https://www.openstreetmap.org/?mlat=${encodeURIComponent(p.lat)}&mlon=${encodeURIComponent(p.lon)}#map=14/${encodeURIComponent(p.lat)}/${encodeURIComponent(p.lon)}`,
         detail: `${p.type} · ${p.lat}, ${p.lon} · © OpenStreetMap contributors`,
       })),

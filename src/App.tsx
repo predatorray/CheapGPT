@@ -1,3 +1,4 @@
+import { PlaceMap } from './PlaceMap';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -672,19 +673,23 @@ export default function App() {
                         </span>
                       </div>
                       {message.result.sources.map((source, n) => (
-                        <a
-                          key={n}
-                          className="source-card"
-                          href={safeUrl(source.url)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <strong>
-                            {source.title}
-                            <OpenInNewRounded />
-                          </strong>
-                          <p>{source.detail}</p>
-                        </a>
+                        <div key={n}>
+                          <a
+                            className="source-card"
+                            href={safeUrl(source.url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <strong>
+                              {source.title}
+                              <OpenInNewRounded />
+                            </strong>
+                            <p>{source.detail}</p>
+                          </a>
+                          {message.result!.tool === 'places' && (
+                            <PlaceMap location={source.location} title={source.title} />
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}

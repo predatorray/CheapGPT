@@ -49,6 +49,8 @@ Unsupported browsers show setup guidance, rather than invented AI replies. The e
 | IP lookup      | `1.1.1.1`                 | ipwho.is, explicit address only. Non-commercial free endpoint, 60 requests/minute; free-tier CORS availability may vary. |
 | Exchange rates | `USD`                     | Frankfurter daily reference rates, no key. Not live market or stock prices.                                              |
 
+OpenStreetMap place results include an interactive, lazy-loaded map in the conversation, with a marker, pan/zoom controls, attribution, and a place link for opening the full map. Map embeds contact OpenStreetMap separately from the Nominatim search; saved chats retain the coordinates. Older saved results without coordinates continue to show links.
+
 Limits and terms can change. Tools do not use a proxy, authentication, autocomplete, tracking, automatic geolocation, or background polling. Provider CORS restrictions, outages, and rate limits are surfaced as failures; no insecure relay is used to bypass them. Requests time out after 15 seconds and successful responses are cached in memory for 5 minutes. Nominatim's limit is per browser: a high-traffic deployment should replace the shared public endpoint with a suitable hosted geocoding provider. Review providers' current terms before commercial use.
 
 In **Just chat**, no prompt or conversation is sent to a server. Tools send their query to the selected provider, which also sees your IP. Auto mode sends a locally generated search query, never the full conversation. Model installation is managed by the browser and can use the network. There are no analytics, remotely loaded fonts, or external image requests from Markdown.
