@@ -1119,9 +1119,6 @@ h1 > span {
     padding: 14px 12px 10px;
     border-radius: 17px;
   }
-  .composer textarea {
-    font-size: 13px;
-  }
   .local-caption {
     font-size: 8px;
   }
@@ -1207,6 +1204,13 @@ h1 > span {
 .empty-chat .composer {
   padding: 18px 16px 12px;
 }
+/* iOS zooms focused fields below 16px; include touch devices in landscape. */
+@media (max-width: 760px), (any-pointer: coarse) {
+  .composer textarea {
+    font-size: 16px;
+  }
+}
+
 .empty-chat .composer textarea {
   min-height: 28px;
 }
