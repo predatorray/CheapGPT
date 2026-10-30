@@ -48,6 +48,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { detectToolRequest, loadModel, modelAvailability, planTool, streamReply } from './model';
+import { capabilitySummary } from './capabilities';
 import { summarizeTitle, titleCheckpoint } from './titles';
 import type { ToolRequest } from './model';
 import { loadConversations, saveConversations } from './storage';
@@ -312,7 +313,7 @@ export default function App() {
         window.LanguageModel &&
         !needsHttps &&
         status !== 'unavailable' &&
-        detectToolRequest(prompt)?.tool !== 'rename_conversation'
+        !['rename_conversation', 'capabilities'].includes(detectToolRequest(prompt)?.tool || '')
       ) {
         setPhase('Acquiring a few brain cells');
         try {
@@ -328,10 +329,15 @@ export default function App() {
         ? { tool: tool as ToolId, query: prompt }
         : null;
       const explicit = detectToolRequest(prompt);
-      if (explicit?.tool === 'rename_conversation') request = explicit;
+      if (explicit?.tool === 'rename_conversation' || explicit?.tool === 'capabilities')
+        request = explicit;
       else if (tool === 'auto') {
         setPhase('Negotiating with the tool department');
         request = model ? await planTool(model, prompt, abort.signal) : detectToolRequest(prompt);
+      }
+      if (request?.tool === 'capabilities') {
+        updateMessage(chatId, assistant.id, { content: capabilitySummary() });
+        return;
       }
       if (request?.tool === 'rename_conversation') {
         const title = request.query.trim().slice(0, 80);
