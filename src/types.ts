@@ -22,6 +22,9 @@ export interface Message {
 export interface Conversation {
   id: string;
   title: string;
+  titleManual?: boolean;
+  titleRound?: number;
+  titleStable?: boolean;
   updatedAt: number;
   messages: Message[];
 }

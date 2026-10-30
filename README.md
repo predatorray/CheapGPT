@@ -61,3 +61,9 @@ Default project URL: `https://predatorray.github.io/CheapGPT/`. An existing GitH
 [MIT](LICENSE) © 2026 Wenhao Ji <predator.ray@gmail.com>.
 
 An independent parody project, not affiliated with OpenAI or ChatGPT. Small model. Big confidence.
+
+### Conversation titles
+
+History starts with the first message as a fallback. Once the local model is ready, a short title is generated after eight idle seconds. Title work uses a small context, is cancelled when you send a message, and times out after a minute. It runs only at completed-round checkpoints 1, 4, and 7; an unchanged topic freezes the title early. Titles stop updating after round 7.
+
+Ask “Rename this conversation to Garden plans” to use the local `rename_conversation` tool. Auto tools also exposes this action to the model planner. A rename permanently disables automatic titles for that conversation, including after reloading saved history. No conversation data leaves the device for naming.

@@ -48,6 +48,8 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { detectToolRequest, loadModel, modelAvailability, planTool, streamReply } from './model';
+import { summarizeTitle, titleCheckpoint } from './titles';
+import type { ToolRequest } from './model';
 import { loadConversations, saveConversations } from './storage';
 import { runTool, safeUrl, toolInfo } from './tools';
 import type {
@@ -129,6 +131,7 @@ export default function App() {
     }
   });
   const base = useRef<ModelSession | null>(null);
+  const titleController = useRef<AbortController | null>(null);
   const controller = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -179,6 +182,54 @@ export default function App() {
     [],
   );
 
+  useEffect(() => {
+    if (busy || !base.current) return;
+    const chat = conversations.find((c) => c.id === activeId);
+    if (!chat) return;
+    const checkpoint = titleCheckpoint(chat);
+    if (checkpoint === null) return;
+    const abort = new AbortController();
+    const timer = setTimeout(async () => {
+      titleController.current = abort;
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        abort.abort();
+      }, 60000);
+      try {
+        const title = await summarizeTitle(base.current!, chat, abort.signal);
+        if (abort.signal.aborted) return;
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id !== chat.id || c.titleManual || c.messages !== chat.messages) return c;
+            const keep = title === 'KEEP' || title === c.title;
+            return {
+              ...c,
+              title: title && !keep ? title : c.title,
+              titleRound: checkpoint,
+              titleStable: keep || checkpoint === 7,
+            };
+          }),
+        );
+      } catch {
+        // A failed idle attempt is optional; never interrupt chat or retry in a loop.
+        if (timedOut || !abort.signal.aborted)
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === chat.id && !c.titleManual ? { ...c, titleRound: checkpoint } : c,
+            ),
+          );
+      } finally {
+        clearTimeout(timeout);
+        if (titleController.current === abort) titleController.current = null;
+      }
+    }, 8000);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [conversations, activeId, busy]);
+
   async function initialize(signal: AbortSignal) {
     setStatus('downloading');
     setModelError('');
@@ -221,6 +272,7 @@ export default function App() {
   async function send() {
     const prompt = input.trim();
     if (!prompt || busy || controller.current) return;
+    titleController.current?.abort();
     const chatId = activeId || id();
     const user: Message = { id: id(), role: 'user', content: prompt };
     const assistant: Message = { id: id(), role: 'assistant', content: '' };
@@ -255,7 +307,13 @@ export default function App() {
     try {
       let model = base.current;
       let startupError = '';
-      if (!model && window.LanguageModel && !needsHttps && status !== 'unavailable') {
+      if (
+        !model &&
+        window.LanguageModel &&
+        !needsHttps &&
+        status !== 'unavailable' &&
+        detectToolRequest(prompt)?.tool !== 'rename_conversation'
+      ) {
         setPhase('Acquiring a few brain cells');
         try {
           model = await initialize(abort.signal);
@@ -266,12 +324,25 @@ export default function App() {
         }
       }
       abort.signal.throwIfAborted();
-      let request: { tool: ToolId; query: string } | null = isConcreteTool
+      let request: ToolRequest | null = isConcreteTool
         ? { tool: tool as ToolId, query: prompt }
         : null;
-      if (tool === 'auto') {
+      const explicit = detectToolRequest(prompt);
+      if (explicit?.tool === 'rename_conversation') request = explicit;
+      else if (tool === 'auto') {
         setPhase('Negotiating with the tool department');
         request = model ? await planTool(model, prompt, abort.signal) : detectToolRequest(prompt);
+      }
+      if (request?.tool === 'rename_conversation') {
+        const title = request.query.trim().slice(0, 80);
+        if (!title) throw new Error('Please provide a nonempty conversation title.');
+        setConversations((prev) =>
+          prev.map((c) => (c.id === chatId ? { ...c, title, titleManual: true } : c)),
+        );
+        updateMessage(chatId, assistant.id, {
+          content: `Conversation renamed to “${title}”. Automatic title updates are now off.`,
+        });
+        return;
       }
       if (request) {
         setPhase(`Borrowing facts from ${toolInfo.find((t) => t.id === request!.tool)?.name}`);

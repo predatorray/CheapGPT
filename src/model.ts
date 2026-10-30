@@ -22,7 +22,7 @@ export async function loadModel(onProgress: (progress: number) => void, signal?:
 }
 
 export interface ToolRequest {
-  tool: ToolId;
+  tool: ToolId | 'rename_conversation';
   query: string;
 }
 
@@ -34,6 +34,21 @@ export function detectToolRequest(input: string): ToolRequest | null {
     .replace(/’/g, "'")
     .replace(/[?!]+$/, '')
     .trim();
+  const rename =
+    query.match(
+      /^(?:please\s+)?(?:rename|(?:change|set)\s+the\s+title\s+of)\s+(?:this|the|our)\s+(?:chat|conversation)(?:\s+title)?\s+(?:to|as)\s+(.+)$/i,
+    ) ||
+    query.match(
+      /^(?:please\s+)?(?:change|set)\s+(?:(?:this|the|our)\s+)?(?:chat|conversation)\s+title\s+(?:to|as)\s+(.+)$/i,
+    );
+  if (rename)
+    return {
+      tool: 'rename_conversation',
+      query: rename[1]
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .slice(0, 80),
+    };
   const patterns: [ToolId, RegExp][] = [
     [
       'weather',
@@ -71,8 +86,8 @@ export async function planTool(
   try {
     session = await base.clone({ signal });
     const text = await session.prompt(
-      `Choose at most one public tool for the user's request. Return ONLY JSON: {"tool":"none|wikipedia|github|places|weather|ip|currency","query":"short search query"}.
-Tools: wikipedia for encyclopedia facts; github for finding public repositories; places for finding a named place on OpenStreetMap; weather for a city forecast (query must be city name only); ip for an explicit IPv4 or IPv6 address (query must be address only); currency for exchange rates (query must be a 3-letter currency code, e.g. USD). Choose the named provider when the user asks to use it. Use none for writing, coding, reasoning or casual conversation. Do not invent an IP address or location.
+      `Choose at most one tool for the user's request. Return ONLY JSON: {"tool":"none|wikipedia|github|places|weather|ip|currency|rename_conversation","query":"short search query"}.
+Tools: rename_conversation changes the current conversation title ONLY when the user explicitly asks to rename it (query is the requested title, max 80 characters); wikipedia for encyclopedia facts; github for finding public repositories; places for finding a named place on OpenStreetMap; weather for a city forecast (query must be city name only); ip for an explicit IPv4 or IPv6 address (query must be address only); currency for exchange rates (query must be a 3-letter currency code, e.g. USD). Choose the named provider when the user asks to use it. Use none for writing, coding, reasoning or casual conversation. Do not invent an IP address or location.
 Examples:
 "What's the weather in Vancouver?" -> {"tool":"weather","query":"Vancouver"}
 "Search GitHub for React chat apps" -> {"tool":"github","query":"React chat apps"}
@@ -86,7 +101,16 @@ User request: ${JSON.stringify(query.slice(0, 4000))}`,
           properties: {
             tool: {
               type: 'string',
-              enum: ['none', 'wikipedia', 'github', 'places', 'weather', 'ip', 'currency'],
+              enum: [
+                'none',
+                'wikipedia',
+                'github',
+                'places',
+                'weather',
+                'ip',
+                'currency',
+                'rename_conversation',
+              ],
             },
             query: { type: 'string' },
           },
@@ -99,11 +123,19 @@ User request: ${JSON.stringify(query.slice(0, 4000))}`,
     if (!parsed || typeof parsed !== 'object') return fallback;
     const { tool, query: search } = parsed as { tool?: string; query?: string };
     if (
-      ['wikipedia', 'github', 'places', 'weather', 'ip', 'currency'].includes(tool || '') &&
+      [
+        'wikipedia',
+        'github',
+        'places',
+        'weather',
+        'ip',
+        'currency',
+        'rename_conversation',
+      ].includes(tool || '') &&
       typeof search === 'string' &&
       search.trim()
     ) {
-      return { tool: tool as ToolId, query: search.slice(0, 300) };
+      return { tool: tool as ToolRequest['tool'], query: search.slice(0, 300) };
     }
     return fallback;
   } catch (error) {
