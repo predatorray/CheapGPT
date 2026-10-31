@@ -18,7 +18,6 @@
 </p>
 
 <p align="center">
-  <a href="https://predatorray.github.io/CheapGPT/"><strong>Try CheapGPT ↗</strong></a> ·
   <a href="#features">Features</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#privacy">Privacy</a> ·
@@ -26,9 +25,14 @@
 </p>
 
 ---
+<div align="center">
+  <a href="https://predatorray.github.io/CheapGPT/" target="_blank" rel="noopener noreferrer"><h3>👉 Try CheapGPT ↗ 👈</h3></a>
+</div>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/predatorray/CheapGPT/assets/cheapgpt-screenshot.png" alt="CheapGPT welcome screen in Safari, with its centered composer, Auto tools menu, and copyright footer" width="60%" />
+  <a href="https://predatorray.github.io/CheapGPT/" target="_blank" rel="noopener noreferrer">
+    <img src="https://raw.githubusercontent.com/predatorray/CheapGPT/assets/cheapgpt-screenshot.png" alt="CheapGPT welcome screen in Safari, with its centered composer, Auto tools menu, and copyright footer" width="60%" />
+  </a>
 </p>
 
 **Your device. Your conversations. Our very modest ambitions.**
