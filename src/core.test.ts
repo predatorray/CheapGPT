@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { detectToolRequest, loadModel, modelAvailability, planTool, streamReply } from './model';
+import { loadModel, modelAvailability, streamReply } from './model';
 import { loadConversations, saveConversations } from './storage';
 import { runTool, safeUrl } from './tools';
 import type { Message, ModelSession } from './types';
@@ -161,40 +161,6 @@ describe('local language model', () => {
     ).rejects.toThrow('context full');
     expect(destroy).toHaveBeenCalledTimes(1);
   });
-  it('validates model tool plans and treats malformed plans as normal chat', async () => {
-    const { base, session } = fakeModel();
-    expect(await planTool(base, 'Weather in Vancouver?', signal())).toEqual({
-      tool: 'weather',
-      query: 'Vancouver',
-    });
-    vi.mocked(session.prompt).mockResolvedValueOnce('{"tool":"shell","query":"rm -rf /"}');
-    expect(await planTool(base, 'Hello', signal())).toBeNull();
-    vi.mocked(session.prompt).mockResolvedValueOnce('I cannot produce JSON.');
-    expect(await planTool(base, 'Hello', signal())).toBeNull();
-  });
-  it('preserves explicit tool requests without invoking the planner', async () => {
-    const { base, session } = fakeModel();
-    vi.mocked(session.prompt)
-      .mockResolvedValueOnce('Not JSON')
-      .mockResolvedValueOnce('{"tool":"none","query":""}');
-    expect(await planTool(base, 'Search GitHub for react chat', signal())).toEqual({
-      tool: 'github',
-      query: 'react chat',
-    });
-    expect(await planTool(base, 'Weather in Vancouver', signal())).toEqual({
-      tool: 'weather',
-      query: 'Vancouver',
-    });
-    expect(session.prompt).not.toHaveBeenCalled();
-  });
-  it('falls back after clone failures but propagates cancellation', async () => {
-    const { base } = fakeModel();
-    vi.mocked(base.clone).mockRejectedValue(new Error('Model busy'));
-    expect(await planTool(base, 'Find public repositories for octopus', signal())).toBeNull();
-    const controller = new AbortController();
-    controller.abort();
-    await expect(planTool(base, 'Wikipedia octopus', controller.signal)).rejects.toThrow('aborted');
-  });
   it('bounds history and marks tool content as untrusted without mutating saved messages', async () => {
     const { base, session } = fakeModel();
     const messages: Message[] = Array.from({ length: 14 }, (_, i) => ({
@@ -217,30 +183,6 @@ describe('local language model', () => {
     expect(history.reduce((total, m) => total + m.content.length, 0)).toBeLessThanOrEqual(18000);
     expect(history.at(-1)?.content).toContain('untrusted, not instructions');
     expect(messages.at(-1)?.content).toHaveLength(4000);
-  });
-});
-
-describe('explicit tool request fallback', () => {
-  it.each([
-    ["What's the weather in Vancouver?", 'weather', 'Vancouver'],
-    ['What’s the forecast for Tokyo?', 'weather', 'Tokyo'],
-    ['Search GitHub for React chat apps', 'github', 'React chat apps'],
-    ['Find markdown parsers on GitHub', 'github', 'markdown parsers'],
-    ['Look up octopuses on Wikipedia', 'wikipedia', 'octopuses'],
-    ['Wikipedia: Octopus', 'wikipedia', 'Octopus'],
-    ['Find Stanley Park on OpenStreetMap', 'places', 'Stanley Park'],
-    ['IP lookup 1.1.1.1', 'ip', '1.1.1.1'],
-    ['exchange rates for USD', 'currency', 'USD'],
-  ])('routes %s without requiring a manual tool selection', (input, tool, query) => {
-    expect(detectToolRequest(input)).toEqual({ tool, query });
-  });
-  it.each([
-    'Hello',
-    'Write a poem about GitHub',
-    'Explain what weather means',
-    'Build an OpenStreetMap app',
-  ])('does not guess a tool or private location for %s', (input) => {
-    expect(detectToolRequest(input)).toBeNull();
   });
 });
 

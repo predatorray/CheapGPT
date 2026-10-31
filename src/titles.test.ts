@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { summarizeTitle, titleCheckpoint } from './titles';
-import { detectToolRequest } from './model';
 import { loadConversations, saveConversations } from './storage';
 import type { Conversation, ModelSession } from './types';
 
@@ -23,17 +22,6 @@ describe('conversation titles', () => {
     expect(titleCheckpoint({ ...chat(9), titleRound: 7 })).toBeNull();
     expect(titleCheckpoint({ ...chat(9), titleManual: true })).toBeNull();
     expect(titleCheckpoint({ ...chat(9), titleStable: true })).toBeNull();
-  });
-  it('recognizes explicit renames without treating title discussions as commands', () => {
-    expect(detectToolRequest('Rename this conversation to Garden plans')).toEqual({
-      tool: 'rename_conversation',
-      query: 'Garden plans',
-    });
-    expect(detectToolRequest('Please change the conversation title to Travel')).toEqual({
-      tool: 'rename_conversation',
-      query: 'Travel',
-    });
-    expect(detectToolRequest('Explain how conversation titles work')).toBeNull();
   });
   it('bounds context and releases its session even when generation fails', async () => {
     const session = { prompt: vi.fn().mockResolvedValue('Garden plans'), destroy: vi.fn() };

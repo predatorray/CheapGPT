@@ -2,8 +2,8 @@ import type { ToolId, ToolResult } from './types';
 import { calculateCurrencyConversion, extractCurrencyConversion } from './currency';
 import { readWebsite } from './website';
 import { CURRENT_IP_QUERY, isCurrentIpRequest } from './ip';
-import { calculationSummary } from './calculator';
-import { dateTimeSummary } from './datetime';
+import { calculate, calculatorExpression, calculationSummary } from './calculator';
+import { dateTimeQuery, dateTimeSummary } from './datetime';
 
 export const toolInfo: {
   id: ToolId;
@@ -15,6 +15,52 @@ export const toolInfo: {
   quota: string;
   local?: boolean;
 }[] = [
+  ...(
+    [
+      {
+        id: 'documents',
+        name: 'Documents',
+        description: 'Ask about your attached files',
+        placeholder: 'Summarize my attached document',
+      },
+      {
+        id: 'table',
+        name: 'Tables',
+        description: 'Filter, sort, and total CSV data',
+        placeholder: 'Sort CSV by Amount descending',
+      },
+      {
+        id: 'date_math',
+        name: 'Date calculations',
+        description: 'Dates, timezones, and durations',
+        placeholder: 'Add 7 days to 2026-10-30',
+      },
+      {
+        id: 'github_file',
+        name: 'Repository files',
+        description: 'Read and compare public READMEs',
+        placeholder: 'Compare GitHub repositories vitejs/vite and facebook/react',
+      },
+      {
+        id: 'export',
+        name: 'Create a file',
+        description: 'Download Markdown, CSV, JSON, or calendars',
+        placeholder: 'Export the previous answer as Markdown',
+      },
+    ] as const
+  ).map((tool) => ({
+    ...tool,
+    provider: ['github_file'].includes(tool.id) ? 'GitHub' : 'Your device',
+    url:
+      tool.id === 'github_file'
+        ? 'https://docs.github.com/en/rest/repos/contents'
+        : 'https://github.com/predatorray/CheapGPT',
+    quota:
+      tool.id === 'github_file'
+        ? 'Public text files up to 256 KB; same GitHub public API quotas.'
+        : 'Local files and structured tasks. Text, Markdown, JSON, CSV; no arbitrary code execution. Complex planning needs local AI.',
+    local: tool.id !== 'github_file',
+  })),
   {
     id: 'calculator',
     name: 'Calculator',
@@ -104,7 +150,7 @@ export const toolInfo: {
 ];
 
 const cache = new Map<string, { time: number; data: unknown }>();
-async function json<T>(url: string, signal: AbortSignal, cacheResponse = true): Promise<T> {
+export async function json<T>(url: string, signal: AbortSignal, cacheResponse = true): Promise<T> {
   const cached = cacheResponse ? cache.get(url) : undefined;
   if (cached && Date.now() - cached.time < 300_000) return cached.data as T;
   const response = await fetch(url, {
@@ -142,8 +188,26 @@ export async function runTool(
   signal: AbortSignal,
 ): Promise<ToolResult> {
   signal.throwIfAborted();
-  if (tool === 'calculator') return { tool, summary: calculationSummary(input), sources: [] };
-  if (tool === 'datetime') return { tool, summary: dateTimeSummary(input), sources: [] };
+  if (tool === 'calculator')
+    return {
+      tool,
+      summary: calculationSummary(input),
+      sources: [],
+      data: { value: calculate(calculatorExpression(input) ?? input.trim()) },
+    };
+  if (tool === 'datetime') {
+    const query = dateTimeQuery(input) ?? input.trim();
+    const timeZone = /^(?:local|now|today|timezone)$/i.test(query)
+      ? Intl.DateTimeFormat().resolvedOptions().timeZone
+      : query;
+    const now = new Date();
+    return {
+      tool,
+      summary: dateTimeSummary(input, now),
+      sources: [],
+      data: { instant: now.toISOString(), timeZone },
+    };
+  }
   if (tool === 'website') return readWebsite(input, signal);
   const query = input.trim().slice(0, 300);
   if (!query) throw new Error('Give this tool something to look up first.');
@@ -181,6 +245,7 @@ export async function runTool(
       }));
     return {
       tool,
+      data: { articles: sources },
       summary: sources.length
         ? `Found ${sources.length} articles. Someone already did the homework.`
         : 'No encyclopedia articles found. Try a different topic.',
@@ -202,6 +267,15 @@ export async function runTool(
     );
     return {
       tool,
+      data: {
+        repositories: data.items.map((r) => ({
+          name: r.full_name,
+          url: r.html_url,
+          description: r.description,
+          stars: r.stargazers_count,
+          language: r.language,
+        })),
+      },
       summary: data.items.length
         ? 'Public repositories, sorted by stars. Popularity is our entire due diligence.'
         : 'No repositories found. Try a broader search.',
@@ -230,6 +304,13 @@ export async function runTool(
     );
     return {
       tool,
+      data: {
+        places: data.map((p) => ({
+          name: p.display_name,
+          latitude: Number(p.lat),
+          longitude: Number(p.lon),
+        })),
+      },
       summary: data.length
         ? 'Places found. Navigation skills sold separately. Data © OpenStreetMap contributors.'
         : 'No places found. Add a city or country to your search.',
@@ -284,6 +365,14 @@ export async function runTool(
         .join('\n');
     return {
       tool,
+      data: {
+        name: place.name,
+        country: place.country,
+        latitude: place.latitude,
+        longitude: place.longitude,
+        current: data.current,
+        daily: data.daily,
+      },
       summary: `Weather in ${place.name}, ${place.country}. A forecast, not a promise.`,
       sources: [
         {
@@ -321,6 +410,7 @@ export async function runTool(
       throw new Error('The IP service returned no address. No IP address has been guessed.');
     return {
       tool,
+      data: JSON.parse(JSON.stringify(data)),
       summary: current
         ? `Your public IP address, as reported by ipwho.is, is **${data.ip}**. This is the address seen by the service; it may be your VPN or proxy’s exit address. Location information is approximate.`
         : `IP lookup for **${data.ip}**. Location information is approximate; this is not a street address.`,
@@ -349,6 +439,14 @@ export async function runTool(
     const answer = calculateCurrencyConversion(conversion, rate);
     return {
       tool,
+      data: {
+        amount: conversion.amount,
+        from: conversion.from,
+        to: conversion.to,
+        rate,
+        convertedAmount: conversion.amount * rate,
+        date: data.date,
+      },
       summary: `${answer}. Reference rates for ${data.date}.`,
       sources: [
         {
@@ -361,6 +459,7 @@ export async function runTool(
   }
   return {
     tool,
+    data: { base: data.base, date: data.date, rates: data.rates },
     summary: `Reference exchange rates for ${data.date}. Your imaginary fortune, in several currencies.`,
     sources: [
       {

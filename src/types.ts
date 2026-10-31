@@ -1,3 +1,4 @@
+import type { GeneratedFile, Json, TaskSnapshot } from './task-types';
 export type ToolId =
   | 'wikipedia'
   | 'github'
@@ -7,7 +8,14 @@ export type ToolId =
   | 'currency'
   | 'website'
   | 'calculator'
-  | 'datetime';
+  | 'datetime'
+  | 'documents'
+  | 'table'
+  | 'date_math'
+  | 'github_file'
+  | 'export'
+  | 'capabilities'
+  | 'conversation';
 export type ToolChoice = 'none' | 'auto' | ToolId;
 export interface Source {
   title: string;
@@ -16,6 +24,8 @@ export interface Source {
   location?: { latitude: number; longitude: number };
 }
 export interface ToolResult {
+  data?: Json;
+  artifact?: GeneratedFile;
   unavailable?: boolean;
   tool: ToolId;
   summary: string;
@@ -26,6 +36,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   result?: ToolResult;
+  task?: TaskSnapshot;
   elapsed?: number;
   interrupted?: boolean;
   error?: boolean;

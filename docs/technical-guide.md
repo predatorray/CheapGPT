@@ -28,7 +28,7 @@ npm run test:integration
 CHROMIUM_PATH=/usr/bin/chromium npm run test:integration
 ```
 
-The integration tests cover automatic and manually selected currency tools, the API request parameters, conversion arithmetic and rounding, missing rates, the Just chat opt-out, and preservation of conversion parameters when a model is available. Exchange-rate responses are fixed test fixtures; native model generation is either disabled or mocked. Tests do not download an AI model or claim to verify live provider availability. GitHub Actions runs these browser tests before deployment.
+The integration tests cover automatic and manually selected currency tools, the API request parameters, conversion arithmetic and rounding, missing rates, the Just chat opt-out, and preservation of conversion parameters when a model is available. Exchange-rate responses are fixed test fixtures; native decisions are explicitly mocked and unavailable-model behavior is checked. Tests do not download an AI model or claim to verify live provider availability. GitHub Actions runs these browser tests before deployment.
 
 ## Local AI
 
@@ -38,18 +38,18 @@ The app feature-detects `window.LanguageModel` and calls `availability()` with E
 
 ### A harness for a small model
 
-- Explicit tool requests run before model planning, preserving the supplied expression, amount, currency codes, address, URL, or title. Calculator, clock, IP, and exchange-rate answers are rendered directly from code or provider data; they do not start a model download or let the model rewrite the result.
-- Other requests can use one constrained JSON lookup plan. The planner gets two recent successful rounds for follow-ups. Plans are checked against the installed registry, cannot rename a chat or invent an IP/URL/calculation/time zone, and require a supplied currency code for rates. Invalid plans and a 15-second planning timeout fall back to ordinary local chat. There is no autonomous multi-step agent loop.
+- Every submitted prompt requires local AI. There are no phrase-matching routes, fixed task recipes, or model-free replies. Auto tools uses a local-model file-request check, model-generated clauses with a coverage check, then binds and executes tools for those clauses in order with schema-constrained arguments generated from observed results. Just chat goes directly to local model drafting.
+- The bounded [task runner](tasks.md) allows six tool calls, typed arguments, successful-result references, and local downloads. Arithmetic arguments receive a separate local-model review scoped to the current step. Atomic adjustments inherit the current unrounded numeric result and its currency. Planning calls have 45-second deadlines inside a three-minute task budget, with one invalid-action repair. The planner cannot guess website URLs, explicit IPs, or missing currency codes and amounts. Missing models and failed planning are visible errors; completed steps are preserved.
 - Replies use up to four recent successful rounds, including bounded source evidence for follow-up questions. Failed and stopped rounds are omitted as pairs. Older turns and reference excerpts are reduced first, while the latest user message is preserved in full. The total input is capped at 18,000 characters; when `measureContextUsage()` and `contextWindow` are available, input is also measured with room reserved for an answer. Requests that cannot fit produce an actionable error instead of silently dropping the beginning of the question. Older history remains visible and saved, but is not all sent to the model.
 - Reply cloning, context measurement, and generation share a 90-second deadline and a 32,000-character output limit. Stop and deadlines release cloned sessions even when an implementation responds slowly to cancellation. Partial responses remain visible with an explanation when generation fails.
 
 This improves routing, arithmetic, and context reliability; it does not make Nano a larger reasoning model. Generated prose and tool choices still require judgment. The session handling follows [Chrome's Prompt API documentation](https://developer.chrome.com/docs/ai/prompt-api).
 
-Unsupported browsers show setup guidance, rather than invented AI replies. The explicit public tools remain usable without a model. Real hardware inference must be tested on an eligible browser; automated tests exercise the API contract with a mock, not a downloaded model.
+Unsupported browsers show setup guidance, rather than invented AI replies. Every submitted prompt, including manual tools, requires the local model. Real hardware inference must be tested on an eligible browser; automated tests exercise the API contract with a mock, not a downloaded model.
 
 ## A few free tools
 
-**Auto tools is enabled by default.** Ask naturally, for example “What's the weather in Vancouver?” or “Search GitHub for React chat apps”. Conservative patterns handle explicit requests first, even without local AI. For other requests, the local model can choose one tool and its query using a constrained JSON plan. General writing, coding, and casual chat stay local. Choose **Just chat** to disable automatic calculations, clock checks, and public lookups, or select a specific tool for an exact lookup using the inputs below. Explicit local rename and capability commands remain available in every mode. Source cards show returned public facts alongside answers.
+**Auto tools is enabled by default.** Nano selects validated calls and consumes their structured results. See [tasks and chaining](tasks.md) for attachments, table operations, file exports, and limits. General writing, coding, and casual chat stay local. Choose **Just chat** to disable tools, or select a tool group to restrict the model's choices. Source cards show provider evidence alongside the model's answer.
 
 | Tool           | Example input                | Public service / limits                                                                                                                                                                                                                           |
 | -------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -70,11 +70,11 @@ In **Just chat**, no prompt or conversation is sent to a server. Calculator and 
 
 Analytics is disabled in development and on local hosts (`localhost`, `*.localhost`, `127.*`, `0.0.0.0`, and IPv6 loopback), including when serving a production build with `npm run preview`. On those hosts, the Google tag script is never loaded and no analytics events are queued or sent.
 
-Currency conversions such as **“Convert 1 USD to CAD”** use a local extraction tool to produce `{ amount: 1, from: "USD", to: "CAD" }`, then fetch base-currency reference rates and calculate the answer in TypeScript. Explicit conversions bypass model planning so a small model cannot drop the amount or destination code. This works in Auto mode, with Exchange rates manually selected, and without local AI. The source card includes the calculation, rate date, and rounded result. Enter explicit three-letter codes; ambiguous symbols and missing parameters are not guessed. A bare code such as `USD` still shows reference rates.
+Currency conversions such as **“Convert 1 USD to CAD”** are planned by Nano using `currency.convert`. The tool fetches reference rates and calculates the numeric conversion in TypeScript. Nano sees that structured result and writes the final response. Auto and manually selected tools both require local AI. Explicit three-letter codes and amounts must come from the request or successful prior results; missing parameters are not guessed.
 
 ### Everyday phrasing
 
-Ask **“What is my timezone?”** or **“Which time zone am I in?”** to see the browser's configured IANA zone and its current UTC offset, including daylight saving time. This reads browser settings locally; it does not verify your physical location. **“What date is it?”** and **“Could you tell me the current time?”** also work without a model.
+Ask **“What is my timezone?”** or **“Which time zone am I in?”** to see the browser's configured IANA zone and its current UTC offset, including daylight saving time. This reads browser settings locally; it does not verify your physical location. **“What date is it?”** and **“Could you tell me the current time?”** also use the local model.
 
 The calculator accepts **“What is 15% of 80?”**, **“How much is 18 * 7?”**, **“Calculate 1,250 + 75”**, and **“What is 12 × 8?”**. It supports `×` and `÷` as alternatives to `*` and `/`, and well-formed thousands groups such as `1,250.50`. Ambiguous decimal-comma inputs such as `1,25` are rejected.
 
@@ -82,11 +82,11 @@ Polite commands such as **“Can you check the weather in Vancouver?”**, **“
 
 ### Your public IP
 
-Ask **“What’s my IP address?”** in Auto mode, or select IP lookup and enter “my IP”. CheapGPT requests **https://ipwho.is/** without an address parameter, so the service detects the browser’s public egress IP. Explicit address lookups still use `/ADDRESS`. Current-IP requests bypass model planning and both app/browser caches. The answer displays the service response directly, so the model cannot replace it with an example such as 1.1.1.1. No IP request runs on page load. VPNs/proxies can change the public IP, and IP geolocation is approximate. CORS or service failures produce an error, not an invented IP.
+Ask **“What’s my IP address?”** in Auto mode, or select IP lookup and enter “my IP”. CheapGPT requests **https://ipwho.is/** without an address parameter, so the service detects the browser’s public egress IP. Explicit address lookups still use `/ADDRESS`. Current-IP tool requests bypass app/browser caches. The actual response is preserved in the task evidence and supplied to Nano for final drafting; generated prose can still be wrong. No IP request runs on page load. VPNs/proxies can change the public IP, and IP geolocation is approximate. CORS or service failures produce an error, not an invented IP.
 
 ## Read a website
 
-Paste a URL or ask **“Read https://example.com/”** / **“Summarize https://example.com/”** in Auto mode, or select **Read website**. The tool fetches HTML/plain text directly, omits credentials and referrer information, extracts up to 8,000 characters, and passes the fetched text to the local model. Without a model, the text is shown in a source card. No remote scripts, images, or frames are loaded, and links open in a separate tab rather than navigating away from your conversation.
+Paste a URL or ask **“Read https://example.com/”** / **“Summarize https://example.com/”** in Auto mode, or select **Read website**. The tool fetches HTML/plain text directly, omits credentials and referrer information, extracts up to 8,000 characters, and passes the fetched text to the local model. Reading also requires the local model. No remote scripts, images, or frames are loaded, and links open in a separate tab rather than navigating away from your conversation.
 
 Most websites do not allow browser cross-origin reads (**CORS**). Regional restrictions, sign-in, mixed-content policies, and outages can also prevent access. A readable HTTP error is reported when available; otherwise the browser does not reveal the exact cause. CheapGPT shows an explanation and an original-site link, without generating a summary of missing content or using a proxy to bypass restrictions. JavaScript-rendered pages, authenticated content, PDFs, and other downloads are not supported. Requests time out after 15 seconds, and response bodies are limited to 1 MB. Website integration tests include actual browser CORS enforcement against a second local origin.
 
@@ -98,7 +98,7 @@ History is stored in this browser's `localStorage`, with up to 50 conversations.
 
 History starts with the first message as a fallback. Once the local model is ready, a short title is generated after eight idle seconds. Title work uses a small context, is cancelled when you send a message, and times out after a minute. It runs only at completed-round checkpoints 1, 4, and 7; an unchanged topic freezes the title early. Titles stop updating after round 7.
 
-Ask “Rename this conversation to Garden plans” to use the local `rename_conversation` tool. Title changes require an explicit supported rename command; model-generated lookup plans cannot rename chats. A rename permanently disables automatic titles for that conversation, including after reloading saved history. No conversation data leaves the device for naming.
+Ask “Rename this conversation to Garden plans” to use the local `rename_conversation` tool. Nano selects `conversation.rename`; the runner permits it only when the user explicitly requested renaming. A rename permanently disables automatic titles for that conversation, including after reloading saved history. No conversation data leaves the device for naming.
 
 ## GitHub Pages
 

@@ -1,7 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { calculateCurrencyConversion, extractCurrencyConversion } from './currency';
-import { detectToolRequest, planTool } from './model';
-import type { ModelSession } from './types';
 
 describe('local currency extraction and calculation tools', () => {
   it.each([
@@ -39,16 +37,5 @@ describe('local currency extraction and calculation tools', () => {
     expect(() => calculateCurrencyConversion({ amount: 1, from: 'USD', to: 'CAD' }, rate)).toThrow(
       'No valid reference rate',
     );
-  });
-  it('preserves both codes and the amount without relying on a model plan', async () => {
-    const clone = vi.fn();
-    const base = { clone } as unknown as ModelSession;
-    const query = 'Convert 1 USD to CAD';
-    expect(detectToolRequest(query)).toEqual({ tool: 'currency', query });
-    expect(await planTool(base, query, new AbortController().signal)).toEqual({
-      tool: 'currency',
-      query,
-    });
-    expect(clone).not.toHaveBeenCalled();
   });
 });

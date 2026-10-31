@@ -47,26 +47,28 @@ import {
   CurrencyExchangeRounded,
   CalculateOutlined,
   ScheduleOutlined,
+  AttachFileRounded,
 } from '@mui/icons-material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { detectToolRequest, loadModel, modelAvailability, planTool, streamReply } from './model';
-import { capabilitySummary } from './capabilities';
+import { loadModel, modelAvailability, streamReply } from './model';
+import { TaskPanel } from './TaskPanel';
+import { readAttachment } from './documents';
+import { runTask } from './runner';
+import type { LocalDocument, TaskSnapshot } from './task-types';
 import { summarizeTitle, titleCheckpoint } from './titles';
-import type { ToolRequest } from './model';
 import { loadConversations, saveConversations } from './storage';
-import { runTool, safeUrl, toolInfo } from './tools';
-import type {
-  Conversation,
-  Message,
-  ModelSession,
-  ModelStatus,
-  ToolChoice,
-  ToolId,
-  ToolResult,
-} from './types';
+import { safeUrl, toolInfo } from './tools';
+import type { Conversation, Message, ModelSession, ModelStatus, ToolChoice, ToolId } from './types';
 
 const toolIcons = {
+  documents: <AttachFileRounded />,
+  table: <CalculateOutlined />,
+  date_math: <ScheduleOutlined />,
+  github_file: <GitHub />,
+  export: <DownloadRounded />,
+  capabilities: <InfoOutlined />,
+  conversation: <HistoryRounded />,
   calculator: <CalculateOutlined />,
   datetime: <ScheduleOutlined />,
   website: <LanguageRounded />,
@@ -113,6 +115,9 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState('');
+  const [documentsByChat, setDocumentsByChat] = useState<Record<string, LocalDocument[]>>({});
+  const [readingFiles, setReadingFiles] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [tool, setTool] = useState<ToolChoice>('auto');
   const [toolsAnchor, setToolsAnchor] = useState<HTMLElement | null>(null);
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
@@ -144,6 +149,7 @@ export default function App() {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const active = conversations.find((c) => c.id === activeId);
   const messages = active?.messages || [];
+  const documents = documentsByChat[activeId || 'draft'] || [];
   const isConcreteTool = tool !== 'none' && tool !== 'auto';
   const needsHttps = !window.isSecureContext && window.location.protocol === 'http:';
 
@@ -259,8 +265,9 @@ export default function App() {
     }
   }
   function newChat() {
-    if (busy) return;
+    if (busy || readingFiles) return;
     setActiveId(null);
+    setDocumentsByChat((prev) => ({ ...prev, draft: [] }));
     setInput('');
     setTool('auto');
     setSidebar(false);
@@ -278,9 +285,11 @@ export default function App() {
   }
   async function send() {
     const prompt = input.trim();
-    if (!prompt || busy || controller.current) return;
+    if (!prompt || busy || readingFiles || controller.current) return;
     titleController.current?.abort();
     const chatId = activeId || id();
+    if (!activeId && documents.length)
+      setDocumentsByChat((prev) => ({ ...prev, [chatId]: documents, draft: [] }));
     const user: Message = { id: id(), role: 'user', content: prompt };
     const assistant: Message = { id: id(), role: 'assistant', content: '' };
     const history = [...messages, user];
@@ -310,105 +319,97 @@ export default function App() {
     controller.current = abort;
     const start = performance.now();
     let content = '';
-    let result: ToolResult | undefined;
+    let currentTask: TaskSnapshot | undefined;
     try {
-      const explicit = detectToolRequest(prompt);
-      let request: ToolRequest | null = isConcreteTool
-        ? { tool: tool as ToolId, query: prompt }
-        : tool === 'auto'
-          ? explicit
-          : null;
-      if (explicit?.tool === 'rename_conversation' || explicit?.tool === 'capabilities')
-        request = explicit;
-      const directAnswer =
-        request &&
-        [
-          'calculator',
-          'datetime',
-          'currency',
-          'ip',
-          'rename_conversation',
-          'capabilities',
-        ].includes(request.tool);
       let model = base.current;
-      let startupError = '';
-      if (
-        !model &&
-        window.LanguageModel &&
-        !needsHttps &&
-        status !== 'unavailable' &&
-        !directAnswer
-      ) {
-        setPhase('Acquiring a few brain cells');
-        try {
-          model = await initialize(abort.signal);
-        } catch (error) {
-          if (abort.signal.aborted) throw error;
-          startupError =
-            error instanceof Error ? error.message : 'The local model could not start.';
-        }
+      if (!model) {
+        if (needsHttps)
+          throw new Error('Local AI needs HTTPS or localhost. Open this app in a secure context.');
+        if (!window.LanguageModel)
+          throw new Error(
+            'This browser does not expose the local LanguageModel API. Use an eligible Chrome browser.',
+          );
+        if (status === 'unavailable')
+          throw new Error(
+            'Your browser reports that its local model is unavailable on this device.',
+          );
+        setPhase('Starting the local model');
+        model = await initialize(abort.signal);
       }
       abort.signal.throwIfAborted();
-      if (!request && tool === 'auto') {
-        setPhase('Negotiating with the tool department');
-        request = model ? await planTool(model, prompt, abort.signal, messages) : explicit;
-      }
-      if (request?.tool === 'capabilities') {
-        updateMessage(chatId, assistant.id, { content: capabilitySummary() });
-        return;
-      }
-      if (request?.tool === 'rename_conversation') {
-        const title = request.query.trim().slice(0, 80);
-        if (!title) throw new Error('Please provide a nonempty conversation title.');
-        setConversations((prev) =>
-          prev.map((c) => (c.id === chatId ? { ...c, title, titleManual: true } : c)),
-        );
-        updateMessage(chatId, assistant.id, {
-          content: `Conversation renamed to “${title}”. Automatic title updates are now off.`,
-        });
-        return;
-      }
-      if (request) {
-        const info = toolInfo.find((t) => t.id === request!.tool);
-        setPhase(
-          info?.local ? `Using ${info.name} on your device` : `Borrowing facts from ${info?.name}`,
-        );
-        result = await runTool(request.tool, request.query, abort.signal);
-        updateMessage(chatId, assistant.id, { result });
-      }
-      abort.signal.throwIfAborted();
-      setPhase('');
-      if (
-        result &&
-        (result.unavailable || ['ip', 'currency', 'calculator', 'datetime'].includes(result.tool))
-      ) {
-        content = result.summary;
-      } else if (model) {
-        await streamReply(model, history, result, abort.signal, (chunk) => {
+      if (tool === 'none') {
+        setPhase('Writing with the local model');
+        await streamReply(model, history, undefined, abort.signal, (chunk) => {
           content += chunk;
           updateMessage(chatId, assistant.id, { content });
         });
-        if (!content.trim())
-          throw new Error(
-            'The model returned an empty response. Even our confidence has limits. Try again.',
-          );
-      } else if (result) {
-        content = `${result.summary}\n\nLocal AI is off, so here are the facts straight from the source. No creative accounting.`;
       } else {
-        throw new Error(
-          startupError ||
-            (needsHttps
-              ? `Local AI needs HTTPS. [Open the secure version](${window.location.href.replace(/^http:/, 'https:')}) to use your browser’s model.`
-              : status === 'unavailable'
-                ? 'Your browser reports that its local model is unavailable on this device. Check browser support and hardware requirements.'
-                : 'This browser does not expose the LanguageModel API. Try an eligible desktop Chrome or Chromium browser.'),
-        );
+        setPhase('Planning with the local model');
+        const outcome = await runTask({
+          goal: prompt,
+          model,
+          documents,
+          messages,
+          signal: abort.signal,
+          selectedGroup: tool === 'auto' ? undefined : tool,
+          onRename: (title) =>
+            setConversations((prev) =>
+              prev.map((chat) =>
+                chat.id === chatId ? { ...chat, title, titleManual: true } : chat,
+              ),
+            ),
+          onUpdate: (task) => {
+            currentTask = task;
+            updateMessage(chatId, assistant.id, { task });
+          },
+        });
+        if (outcome.answer !== undefined) {
+          // Only a clarification written by the local model can finish here.
+          content = outcome.answer;
+        } else {
+          if (outcome.snapshot.status === 'partial')
+            throw new Error(
+              outcome.snapshot.note || 'The task did not complete all requested operations.',
+            );
+          const remaining = outcome.deadline - Date.now();
+          if (remaining <= 0)
+            throw new Error(
+              'The task deadline expired. Completed tool results are preserved below.',
+            );
+          setPhase('Writing from the completed results with the local model');
+          await streamReply(
+            model,
+            outcome.useHistory === false ? [user] : history,
+            outcome.context,
+            AbortSignal.any([abort.signal, AbortSignal.timeout(remaining)]),
+            (chunk) => {
+              content += chunk;
+              updateMessage(chatId, assistant.id, { content });
+            },
+          );
+        }
       }
+      if (!content.trim())
+        throw new Error(
+          'The local model returned an empty response. No substitute answer was generated.',
+        );
       updateMessage(chatId, assistant.id, {
         content,
         elapsed: Math.max(0.1, (performance.now() - start) / 1000),
       });
     } catch (error) {
+      if (currentTask)
+        updateMessage(chatId, assistant.id, {
+          task: {
+            ...currentTask,
+            status: abort.signal.aborted ? 'stopped' : 'partial',
+            note: abort.signal.aborted
+              ? 'Stopped by you. Completed results are preserved.'
+              : error instanceof Error
+                ? error.message
+                : 'Final answer generation failed.',
+          },
+        });
       if (abort.signal.aborted)
         updateMessage(chatId, assistant.id, {
           content: content || 'Stopped. An excellent time-saving strategy.',
@@ -419,9 +420,7 @@ export default function App() {
         updateMessage(chatId, assistant.id, {
           content: content
             ? `${content}\n\nResponse incomplete: ${error instanceof Error ? error.message : 'The local model stopped unexpectedly.'}`
-            : result
-              ? `${result.summary}\n\nThe local model stumbled, but the source results are below.`
-              : `Well, that was ambitious. ${error instanceof Error ? error.message : 'Something went wrong.'} ${!window.LanguageModel || needsHttps || status === 'unavailable' ? 'Public tools still work: try “Weather in Vancouver” or choose a tool from the menu.' : 'Try sending another message.'}`,
+            : `Local AI could not complete this request. ${error instanceof Error ? error.message : 'Something went wrong.'}`,
           error: true,
           elapsed: (performance.now() - start) / 1000,
         });
@@ -430,6 +429,28 @@ export default function App() {
       setPhase('');
       controller.current = null;
       textarea.current?.focus();
+    }
+  }
+  async function attachFiles(files: FileList | null) {
+    if (!files?.length || busy || readingFiles) return;
+    const key = activeId || 'draft';
+    setReadingFiles(true);
+    try {
+      if (
+        files.length + documents.length > 4 ||
+        Array.from(files).reduce((n, file) => n + file.size, 0) > 2_000_000
+      )
+        throw new Error('Use up to four files and 2 MB of attachments per chat.');
+      const attached = await Promise.all(Array.from(files).map(readAttachment));
+      const next = [...documents, ...attached];
+      if (next.length > 4 || next.reduce((n, d) => n + d.text.length, 0) > 2_000_000)
+        throw new Error('Use up to four files and 2 MB of text per chat.');
+      setDocumentsByChat((prev) => ({ ...prev, [key]: next }));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Could not read attachments.');
+    } finally {
+      setReadingFiles(false);
+      if (fileInput.current) fileInput.current.value = '';
     }
   }
   async function copy(text: string) {
@@ -484,7 +505,7 @@ export default function App() {
         startIcon={<AddRounded />}
         fullWidth
         onClick={newChat}
-        disabled={busy}
+        disabled={busy || readingFiles}
       >
         New chat<span className="key-hint">a fresh start</span>
       </Button>
@@ -522,7 +543,7 @@ export default function App() {
             .map((c) => (
               <div key={c.id} className={`history-item ${activeId === c.id ? 'selected' : ''}`}>
                 <button
-                  disabled={busy}
+                  disabled={busy || readingFiles}
                   onClick={() => {
                     setActiveId(c.id);
                     setDrawer(false);
@@ -532,11 +553,16 @@ export default function App() {
                   {c.title}
                 </button>
                 <IconButton
-                  disabled={busy}
+                  disabled={busy || readingFiles}
                   size="small"
                   aria-label={`Delete ${c.title}`}
                   onClick={() => {
                     setConversations((prev) => prev.filter((v) => v.id !== c.id));
+                    setDocumentsByChat((prev) => {
+                      const next = { ...prev };
+                      delete next[c.id];
+                      return next;
+                    });
                     if (activeId === c.id) setActiveId(null);
                   }}
                 >
@@ -688,6 +714,10 @@ export default function App() {
                       </ReactMarkdown>
                     </div>
                   )}
+                  {message.task &&
+                    (message.task.steps.length > 0 || message.task.status !== 'complete') && (
+                      <TaskPanel task={message.task} />
+                    )}
                   {message.result && (
                     <div className="source-results">
                       <div className="source-heading">
@@ -773,6 +803,40 @@ export default function App() {
             </section>
           )}
           <div className="composer-area">
+            {documents.length > 0 && (
+              <div className="attachment-list" aria-label="Attached files">
+                {documents.map((doc) => (
+                  <span key={doc.id}>
+                    {doc.name}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${doc.name}`}
+                      disabled={busy || readingFiles}
+                      onClick={() =>
+                        setDocumentsByChat((prev) => ({
+                          ...prev,
+                          [activeId || 'draft']: documents.filter((d) => d.id !== doc.id),
+                        }))
+                      }
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <small>
+                  Local files · reattach after reload. Used excerpts follow your history setting.
+                </small>
+              </div>
+            )}
+            <input
+              type="file"
+              ref={fileInput}
+              accept=".txt,.md,.markdown,.csv,.json"
+              multiple
+              hidden
+              aria-label="Attach local files"
+              onChange={(event) => void attachFiles(event.target.files)}
+            />
             <form
               className="composer"
               onSubmit={(e) => {
@@ -801,6 +865,18 @@ export default function App() {
               />
               <div className="composer-toolbar">
                 <div className="composer-tools">
+                  <Tooltip title="Attach text, Markdown, JSON, or CSV">
+                    <span>
+                      <IconButton
+                        size="small"
+                        aria-label="Attach files"
+                        disabled={busy || readingFiles}
+                        onClick={() => fileInput.current?.click()}
+                      >
+                        <AttachFileRounded fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
                   <Button
                     size="small"
                     startIcon={<TuneRounded />}
@@ -821,8 +897,8 @@ export default function App() {
                       ? 'Brainpower: local'
                       : isConcreteTool
                         ? toolInfo.find((t) => t.id === tool)?.local
-                          ? 'On your device, no AI needed'
-                          : 'Public data, no AI needed'
+                          ? 'Tools chosen by local AI'
+                          : 'Lookups chosen by local AI'
                         : 'No cloud. No bill.'}
                   </span>
                 </div>
@@ -832,7 +908,7 @@ export default function App() {
                       type={busy ? 'button' : 'submit'}
                       className="send-button"
                       aria-label={busy ? 'Stop generating' : 'Send message'}
-                      disabled={!busy && !input.trim()}
+                      disabled={!busy && (!input.trim() || readingFiles)}
                       onClick={busy ? () => controller.current?.abort() : undefined}
                     >
                       {busy ? <StopRounded /> : <ArrowUpwardRounded />}
@@ -852,7 +928,7 @@ export default function App() {
                 {
                   id: 'auto',
                   name: 'Let the tiny brain choose',
-                  description: 'Local utilities and public lookups when useful',
+                  description: 'Local AI chooses and chains tools',
                 },
                 ...toolInfo,
               ].map((item) => (
@@ -896,11 +972,11 @@ export default function App() {
                   {status === 'downloading'
                     ? `Downloading the brain… ${progress}%`
                     : isConcreteTool
-                      ? 'This tool works without a local model.'
+                      ? 'All requests require the local model.'
                       : needsHttps
                         ? 'Local AI needs a secure HTTPS connection.'
                         : status === 'downloadable' || status === 'available' || status === 'error'
-                          ? 'Local AI starts with your next message.'
+                          ? 'Your next message starts the local model.'
                           : 'A tiny brain needs a compatible browser.'}
                 </span>
                 <button onClick={() => setSettings(true)}>
@@ -953,14 +1029,14 @@ export default function App() {
               This page is using HTTP. Your browser only exposes local AI on secure pages.{' '}
               <a href={window.location.href.replace(/^http:/, 'https:')}>Open the HTTPS version</a>.
               If it does not load securely, the site owner needs to configure HTTPS for this domain
-              in GitHub Pages settings. Public tools still work over HTTP.
+              in GitHub Pages settings. All requests require a secure context and the local model.
             </Alert>
           )}
           {status === 'unsupported' || status === 'unavailable' ? (
             <Alert severity="info" sx={{ mt: 2 }}>
               Use a supported desktop Chrome or Chromium browser with the Prompt API available and
-              eligible hardware. Browser version, region, storage, and device requirements vary.
-              Public tools still work here.
+              eligible hardware. Browser version, region, storage, and device requirements vary. No
+              canned answer or tool-only fallback is used.
             </Alert>
           ) : (
             status !== 'ready' && (
@@ -1057,12 +1133,13 @@ export default function App() {
           <p>
             “Just chat” sends no prompts to any service. Calculator and Date & time run entirely on
             your device. Public lookup tools send a search query to their provider, which also sees
-            your IP address. Auto tools handles explicit requests directly and lets local AI choose
-            one lookup for other requests. The full conversation is never sent to a provider.
+            your IP address. Every submitted prompt is processed by local AI. Auto tools lets that
+            model choose bounded tool chains; code validates and executes the chosen calls. The full
+            conversation is never sent to a provider.
           </p>
           <p>
-            Choose a tool for an exact lookup, even without AI. No keys, accounts, or paid services.
-            These providers have usage policies and availability limits.
+            Choose a tool to limit which capabilities the local model can use. No keys, accounts, or
+            paid services. These providers have usage policies and availability limits.
           </p>
           {toolInfo.map((t) => (
             <div key={t.id} className="tool-info">
@@ -1096,6 +1173,7 @@ export default function App() {
             color="error"
             onClick={() => {
               setConversations([]);
+              setDocumentsByChat({});
               setActiveId(null);
               setConfirmClear(false);
             }}

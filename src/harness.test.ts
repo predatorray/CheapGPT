@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calculate, calculatorExpression } from './calculator';
 import { dateTimeQuery, dateTimeSummary } from './datetime';
 import { replyContext } from './context';
-import { planTool, streamReply } from './model';
+import { streamReply } from './model';
 import { runTool } from './tools';
 import type { Message, ModelSession, ToolResult } from './types';
 
@@ -91,53 +91,6 @@ describe('local deterministic utilities', () => {
   });
 });
 
-describe('routing boundaries', () => {
-  it.each([
-    ['Search GitHub for React chat', 'github', 'React chat'],
-    ['Calculate 2 + 2', 'calculator', '2 + 2'],
-    ['Rename this conversation to Garden', 'rename_conversation', 'Garden'],
-  ])('keeps the explicit request %s authoritative', async (query, tool, value) => {
-    const { base, session } = model('{"tool":"weather","query":"Wrong city"}');
-    expect(await planTool(base, query, signal())).toEqual({ tool, query: value });
-    expect(session.prompt).not.toHaveBeenCalled();
-  });
-  it.each(['rename_conversation', 'ip', 'website', 'calculator', 'datetime', 'shell'])(
-    'rejects an invented %s action',
-    async (tool) => {
-      const { base } = model(JSON.stringify({ tool, query: 'invented' }));
-      expect(await planTool(base, 'Hello', signal())).toBeNull();
-    },
-  );
-  it('rejects a generated base currency absent from the user request', async () => {
-    const { base } = model('{"tool":"currency","query":"USD"}');
-    expect(await planTool(base, 'Show exchange rates', signal())).toBeNull();
-    expect(await planTool(base, 'Show rates based on USD', signal())).toEqual({
-      tool: 'currency',
-      query: 'USD',
-    });
-  });
-  it('uses bounded recent conversation for explicit follow-up planning', async () => {
-    const { base, session } = model('{"tool":"weather","query":"Vancouver"}');
-    await planTool(base, 'And the forecast there?', signal(), [
-      message('user', 'Tell me about Vancouver'),
-      message('assistant', 'It is in Canada.'),
-    ]);
-    expect(vi.mocked(session.prompt).mock.calls[0][0]).toContain('Tell me about Vancouver');
-    expect(vi.mocked(session.prompt).mock.calls[0][1]?.responseConstraint).toMatchObject({
-      required: ['tool', 'query'],
-    });
-  });
-  it('times out a stalled planner, frees its session, and falls back to chat', async () => {
-    vi.useFakeTimers();
-    const { base, session } = model();
-    session.prompt = vi.fn(() => new Promise<string>(() => {}));
-    const planned = planTool(base, 'Find public React repositories', signal());
-    await vi.advanceTimersByTimeAsync(15000);
-    expect(await planned).toBeNull();
-    expect(session.destroy).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('small-model context and lifetime', () => {
   it('retains the full readable website excerpt when it fits the context budget', async () => {
     const { session } = model();
@@ -154,7 +107,7 @@ describe('small-model context and lifetime', () => {
       signal(),
     );
     expect(history[0].content).toContain('Final paragraph.');
-    const json = history[0].content.split('stale):\n')[1];
+    const json = history[0].content.split('stale):\n')[1].split('\n')[0];
     expect(JSON.parse(json).sources[0].detail).toBe(detail);
   });
   it('keeps only successful pairs, their source evidence, and the entire latest request', async () => {
@@ -224,23 +177,6 @@ describe('small-model context and lifetime', () => {
     await expect(reply).rejects.toMatchObject({ name: 'AbortError' });
     expect(session.destroy).toHaveBeenCalledTimes(1);
     expect(chunks).not.toHaveBeenCalled();
-  });
-  it('destroys a clone that arrives after its timeout', async () => {
-    vi.useFakeTimers();
-    const { base, session } = model();
-    let resolve!: (session: ModelSession) => void;
-    base.clone = vi.fn(
-      () =>
-        new Promise((done) => {
-          resolve = done;
-        }),
-    );
-    const planned = planTool(base, 'Find public React repositories', signal());
-    await vi.advanceTimersByTimeAsync(15000);
-    expect(await planned).toBeNull();
-    resolve(session);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(session.destroy).toHaveBeenCalledTimes(1);
   });
   it('times out a partial reply and prevents late output from updating a later turn', async () => {
     vi.useFakeTimers();

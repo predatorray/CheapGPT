@@ -43,35 +43,40 @@ CheapGPT pairs the browser’s `LanguageModel` (Prompt) API with a handful of us
 No remote AI API, API keys, application backend, accounts, or subscription. A small model can still make big mistakes—double-check the important stuff.
 
 > [!IMPORTANT]
-> Local AI needs an eligible browser and device, plus HTTPS or localhost. The first model download can be several gigabytes. Chrome’s built-in model is not available on mobile; the responsive interface and explicit tools remain available. See [browser support and setup](https://developer.chrome.com/docs/ai/prompt-api). Explicit tools remain usable when the model is unavailable.
+> Local AI needs an eligible browser and device, plus HTTPS or localhost. The first model download can be several gigabytes. Chrome’s built-in model is not available on mobile; the responsive interface remains available. See [browser support and setup](https://developer.chrome.com/docs/ai/prompt-api). All submitted prompts require the local model.
 
 ## Features
 
-|                              | A little capability, at no cost                                                                                                              |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🧠 **On-device chat**        | Stream answers from the browser’s local model, with Markdown, code blocks, and a Stop button.                                                |
-| 🧮 **Useful tools**          | Local arithmetic and timezone checks, plus encyclopedia, repository, weather, place, IP, and exchange-rate lookups.                          |
-| 🧭 **Auto tools**            | Explicit requests run directly; local AI can choose a lookup for other requests. Switch to **Just chat** to disable automatic tool requests. |
-| 🗂️ **Browser-local history** | Search, switch, delete, copy, and export conversations. Turn persistence off on shared devices.                                              |
-| 🔎 **Visible sources**       | Public lookup results include source cards. Place results offer an interactive OpenStreetMap view.                                           |
-| 🌱 **Small-model harness**   | Validated plans, bounded context, retained source evidence, deadlines, and cancellation.                                                     |
-| 📱 **Responsive interface**  | A quiet, warm palette across desktop and mobile layouts.                                                                                     |
+|                              | A little capability, at no cost                                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 🧠 **On-device chat**        | Stream answers from the browser’s local model, with Markdown, code blocks, and a Stop button.                                  |
+| 🧮 **Useful tools**          | Local arithmetic and timezone checks, plus encyclopedia, repository, weather, place, IP, and exchange-rate lookups.            |
+| 🧭 **Auto tools**            | The local model selects and chains up to six validated tool calls. Switch to **Just chat** to disable automatic tool requests. |
+| 🗂️ **Browser-local history** | Search, switch, delete, copy, and export conversations. Turn persistence off on shared devices.                                |
+| 🔎 **Visible sources**       | Public lookup results include source cards. Place results offer an interactive OpenStreetMap view.                             |
+| 🌱 **Small-model harness**   | Validated plans, bounded context, retained source evidence, deadlines, and cancellation.                                       |
+| 📱 **Responsive interface**  | A quiet, warm palette across desktop and mobile layouts.                                                                       |
 
 ## Give the tiny brain something to do
 
-| Try asking…                                              | What happens                                                     |
-| -------------------------------------------------------- | ---------------------------------------------------------------- |
-| `Draft a polite follow-up email about an invoice`        | The local model helps with writing.                              |
-| `Summarize these meeting notes: …`                       | Pasted text stays on-device for inference.                       |
-| `What is 15% of 80?`                                     | The local calculator returns **12**.                             |
-| `What is my timezone?`                                   | Reads the browser’s configured zone and current UTC offset.      |
-| `Can you check the weather in Vancouver?`                | Looks up a three-day forecast through Open-Meteo.                |
-| `Please search GitHub for React chat apps`               | Searches public repositories.                                    |
-| `Convert 100 USD to CAD`                                 | Fetches daily reference rates and calculates the result in code. |
-| `Summarize https://example.com/`                         | Reads page text if the site permits cross-origin access.         |
-| `Could you rename this conversation to Weekly planning?` | Renames the chat locally and stops automatic title updates.      |
+| Try asking…                                                                     | What happens                                                     |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `Draft a polite follow-up email about an invoice`                               | The local model helps with writing.                              |
+| `Summarize these meeting notes: …`                                              | Pasted text stays on-device for inference.                       |
+| `What is 15% of 80?`                                                            | The local calculator returns **12**.                             |
+| `What is my timezone?`                                                          | Reads the browser’s configured zone and current UTC offset.      |
+| `Can you check the weather in Vancouver?`                                       | Looks up a three-day forecast through Open-Meteo.                |
+| `Please search GitHub for React chat apps`                                      | Searches public repositories.                                    |
+| `Convert 250 USD to CAD, add 12% tax, split between 3 people and export as CSV` | Chains conversion and calculation, then prepares a CSV download. |
+| `Extract owner, deadline from notes`                                            | Reads attached notes locally and returns supported fields.       |
+| `Sort CSV by Amount descending`                                                 | Sorts an attached CSV in code.                                   |
+| `Convert 100 USD to CAD`                                                        | Fetches daily reference rates and calculates the result in code. |
+| `Summarize https://example.com/`                                                | Reads page text if the site permits cross-origin access.         |
+| `Could you rename this conversation to Weekly planning?`                        | Renames the chat locally and stops automatic title updates.      |
 
-**Writing needs local AI. Explicit tools can work without it.** Calculator, clock, IP, and exchange-rate answers bypass model rewriting. For manual lookups, choose a tool from the composer menu.
+**Every prompt uses local AI.** Nano selects the tools, supplies their arguments, and writes the final answer from their results. Choose a tool group in the composer to restrict its choices. There are no prompt-specific recipes or model-free reply fallbacks.
+
+Attach text, Markdown, JSON, or CSV with the paperclip. Workflows support repository comparison, document questions, table operations, date calculations, and downloadable Markdown/CSV/JSON/calendar files. [Task examples and limits →](docs/tasks.md)
 
 ## Quick start
 
@@ -86,7 +91,7 @@ npm run dev
 
 Open [localhost:5173](http://localhost:5173). No environment file or API key required.
 
-Send a chat message to start the local model when available. Download progress appears in the conversation; **Stop** cancels setup or generation. Calculator and clock requests do not trigger a model download.
+Send a chat message to start the local model when available. Download progress appears in the conversation; **Stop** cancels setup or generation. This applies to calculator and clock requests too.
 
 ## Privacy
 
@@ -98,6 +103,8 @@ Send a chat message to start the local model when available. Download progress a
 | **Read website**             | A direct request goes to the supplied URL. No remote scripts, images, or frames are loaded from the fetched page. |
 | **Model installation**       | The browser manages a separate download, which requires network access.                                           |
 | **Saved conversations**      | Up to 50 chats stay in this browser’s unencrypted `localStorage`. No account or server storage.                   |
+
+Attachments stay in memory for the current chat; used excerpts, computed tables, and generated files follow the conversation history setting.
 
 Production builds use Google Analytics (`G-W6LF4ZBZ4Q`) for site usage; the app does not send prompts, conversations, or tool queries as analytics events. Analytics is disabled in development and on localhost and loopback addresses, including local production previews. There are no remotely loaded fonts in the app. OpenStreetMap embeds make a separate request to display the map. **Remember conversations** controls persistence; **Delete all chats** clears saved history.
 
@@ -117,18 +124,17 @@ Production builds use Google Analytics (`G-W6LF4ZBZ4Q`) for site usage; the app 
 
 ```mermaid
 flowchart LR
-    A[Your message] --> B{Request routing}
-    B --> C[Local utilities]
-    B --> D[Public lookup]
-    B --> E[On-device model]
-    D --> F[Source cards]
-    D --> E
-    C --> G[Conversation]
-    E --> G
-    F --> G
+    A[Your message] --> B{Simple request?}
+    B -->|Yes| C[Direct tool]
+    B -->|No| D[Choose next action]
+    D --> E[Validate and run tool]
+    E --> F[Structured results]
+    F --> D
+    D -->|Finish or clarify| G[Answer and downloads]
+    C --> G
 ```
 
-Explicit requests take precedence over model guesses. Other requests can use one validated JSON lookup plan. Each reply gets its own cloned model session, with bounded context and cancellation.
+Every Auto tools request uses a bounded model decision → validated call → observation loop with structured result references. Each reply gets its own cloned model session, with bounded context and cancellation.
 
 [Read about the small-model harness →](docs/technical-guide.md#a-harness-for-a-small-model)
 
@@ -142,7 +148,7 @@ npx playwright install chromium
 npm run test:integration  # Browser integration tests
 ```
 
-Browser tests use provider fixtures and a mocked or disabled native model. They verify app behavior and API contracts; they do not download Nano or establish live inference quality.
+Browser tests use provider fixtures and explicitly mocked native decisions, plus checks that unavailable models cannot trigger hidden workflows. They verify app behavior and API contracts; they do not download Nano or establish live inference quality.
 
 The [GitHub Actions workflow](.github/workflows/deploy.yml) tests and builds pull requests, then deploys successful pushes to `main` to GitHub Pages. Relative assets support repository subpaths.
 

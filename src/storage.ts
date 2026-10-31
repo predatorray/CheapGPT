@@ -1,3 +1,4 @@
+import type { TaskSnapshot, Json } from './task-types';
 import type { Conversation, ToolResult } from './types';
 const key = 'cheapgpt.conversations.v1';
 function validResult(data: unknown): data is ToolResult {
@@ -14,8 +15,17 @@ function validResult(data: unknown): data is ToolResult {
       'website',
       'calculator',
       'datetime',
+      'documents',
+      'table',
+      'date_math',
+      'github_file',
+      'export',
+      'capabilities',
+      'conversation',
     ].includes(String(result.tool)) &&
     typeof result.summary === 'string' &&
+    (result.data === undefined || validData(result.data)) &&
+    (result.artifact === undefined || validArtifact(result.artifact)) &&
     Array.isArray(result.sources) &&
     result.sources.every((s: unknown) => {
       if (!s || typeof s !== 'object') return false;
@@ -27,6 +37,105 @@ function validResult(data: unknown): data is ToolResult {
       );
     })
   );
+}
+function validData(data: unknown, depth = 0): data is Json {
+  if (depth > 14) return false;
+  if (data === null || typeof data === 'boolean' || typeof data === 'string')
+    return typeof data !== 'string' || data.length <= 256000;
+  if (typeof data === 'number') return Number.isFinite(data);
+  if (Array.isArray(data))
+    return data.length <= 2000 && data.every((item) => validData(item, depth + 1));
+  return (
+    !!data &&
+    typeof data === 'object' &&
+    Object.keys(data).length <= 100 &&
+    Object.entries(data).every(
+      ([key, item]) =>
+        !['__proto__', 'constructor', 'prototype'].includes(key) && validData(item, depth + 1),
+    )
+  );
+}
+function validArtifact(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const file = data as Record<string, unknown>;
+  return (
+    typeof file.name === 'string' &&
+    /^[a-zA-Z0-9_-][a-zA-Z0-9._-]*\.(?:md|csv|json|ics)$/.test(file.name) &&
+    ['text/markdown', 'text/csv', 'application/json', 'text/calendar'].includes(
+      String(file.mime),
+    ) &&
+    typeof file.content === 'string' &&
+    file.content.length <= 256000
+  );
+}
+function savedTask(data: unknown): TaskSnapshot | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const task = data as TaskSnapshot;
+  if (
+    (task.instructions !== undefined &&
+      (!Array.isArray(task.instructions) ||
+        task.instructions.length > 7 ||
+        task.instructions.some(
+          (instruction) => typeof instruction !== 'string' || instruction.length > 500,
+        ))) ||
+    (task.scope !== undefined &&
+      (!task.scope ||
+        typeof task.scope.fileRequested !== 'boolean' ||
+        typeof task.scope.useHistory !== 'boolean' ||
+        !Array.isArray(task.scope.groups) ||
+        task.scope.groups.length > 20 ||
+        task.scope.groups.some((group) => typeof group !== 'string' || group.length > 100))) ||
+    (task.plan !== undefined &&
+      (!Array.isArray(task.plan) ||
+        task.plan.length > 6 ||
+        task.plan.some(
+          (step) =>
+            !step ||
+            typeof step.tool !== 'string' ||
+            typeof step.purpose !== 'string' ||
+            step.purpose.length > 500,
+        ))) ||
+    (task.planningCalls !== undefined &&
+      (!Number.isInteger(task.planningCalls) ||
+        task.planningCalls < 0 ||
+        task.planningCalls > 40)) ||
+    typeof task.goal !== 'string' ||
+    task.goal.length > 4000 ||
+    !['running', 'complete', 'partial', 'clarify', 'stopped'].includes(task.status) ||
+    !Array.isArray(task.steps) ||
+    task.steps.length > 6 ||
+    (task.note !== undefined && typeof task.note !== 'string') ||
+    (task.workflow !== undefined && typeof task.workflow !== 'string')
+  )
+    return undefined;
+  if (
+    task.steps.some(
+      (step) =>
+        !step ||
+        typeof step.id !== 'string' ||
+        typeof step.tool !== 'string' ||
+        typeof step.summary !== 'string' ||
+        !['running', 'done', 'error'].includes(step.status) ||
+        !validData(step.args) ||
+        (step.error !== undefined && typeof step.error !== 'string') ||
+        (step.result !== undefined && !validResult(step.result)),
+    )
+  )
+    return undefined;
+  return {
+    ...task,
+    status: task.status === 'running' ? 'stopped' : task.status,
+    steps: task.steps.map((step) =>
+      step.status === 'running'
+        ? {
+            ...step,
+            status: 'error',
+            summary: 'Interrupted by reload.',
+            error: 'Interrupted by reload.',
+          }
+        : step,
+    ),
+  };
 }
 export function loadConversations(): Conversation[] {
   try {
@@ -61,6 +170,7 @@ export function loadConversations(): Conversation[] {
           error: m.error === true,
           interrupted: m.interrupted === true,
           result: validResult(m.result) ? m.result : undefined,
+          task: savedTask(m.task),
         })),
       }));
   } catch {

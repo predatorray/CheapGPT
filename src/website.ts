@@ -109,6 +109,7 @@ export async function readWebsite(input: string, signal: AbortSignal): Promise<T
       );
     return {
       tool: 'website',
+      data: { title, url, text: text.slice(0, 8000), truncated: text.length > 8000 },
       summary: `Read ${title}. This is the fetched page text, not an interactive browser session.`,
       sources: [
         {
