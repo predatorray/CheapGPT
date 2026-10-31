@@ -327,11 +327,11 @@ export default function App() {
           throw new Error('Local AI needs HTTPS or localhost. Open this app in a secure context.');
         if (!window.LanguageModel)
           throw new Error(
-            'This browser does not expose the local LanguageModel API. Use an eligible Chrome browser.',
+            'This browser does not expose the local LanguageModel API. Use an eligible Chrome browser.\n\n[Browser support & setup](https://developer.chrome.com/docs/ai/prompt-api)',
           );
         if (status === 'unavailable')
           throw new Error(
-            'Your browser reports that its local model is unavailable on this device.',
+            'Your browser reports that its local model is unavailable on this device.\n\n[Browser support & setup](https://developer.chrome.com/docs/ai/prompt-api)',
           );
         setPhase('Starting the local model');
         model = await initialize(abort.signal);
