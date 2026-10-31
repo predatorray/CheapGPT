@@ -99,7 +99,7 @@ Send a chat message to start the local model when available. Download progress a
 | **Model installation**       | The browser manages a separate download, which requires network access.                                           |
 | **Saved conversations**      | Up to 50 chats stay in this browser’s unencrypted `localStorage`. No account or server storage.                   |
 
-There are no analytics, tracking scripts, or remotely loaded fonts in the app. OpenStreetMap embeds make a separate request to display the map. **Remember conversations** controls persistence; **Delete all chats** clears saved history.
+Production builds use Google Analytics (`G-W6LF4ZBZ4Q`) for site usage; the app does not send prompts, conversations, or tool queries as analytics events. Analytics is disabled in development and on localhost and loopback addresses, including local production previews. There are no remotely loaded fonts in the app. OpenStreetMap embeds make a separate request to display the map. **Remember conversations** controls persistence; **Delete all chats** clears saved history.
 
 ## A few honest limitations
 
