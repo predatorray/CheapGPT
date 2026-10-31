@@ -3,7 +3,7 @@
     <img src="public/favicon.svg" alt="CheapGPT coin logo" width="72" height="72" />
   </a>
   <h1>CheapGPT.</h1>
-  <h3><em>Big ideas. Tiny budget.</em></h3>
+  <h3><em>Free of charge. Occasionally correct.</em></h3>
   <p>
     A ChatGPT-style chat app with a very modest brain.<br />
     Powered by your browser’s on-device model. No AI bill included.
@@ -42,7 +42,7 @@ No remote AI API, API keys, application backend, accounts, or subscription. A sm
 
 ## Features
 
-|                              | A little capability, on a little budget                                                                                                      |
+|                              | A little capability, at no cost                                                                                                              |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🧠 **On-device chat**        | Stream answers from the browser’s local model, with Markdown, code blocks, and a Stop button.                                                |
 | 🧮 **Useful tools**          | Local arithmetic and timezone checks, plus encyclopedia, repository, weather, place, IP, and exchange-rate lookups.                          |
@@ -149,5 +149,5 @@ The [GitHub Actions workflow](.github/workflows/deploy.yml) tests and builds pul
 
 <p align="center">
   <sub>An independent parody project. Not affiliated with OpenAI or ChatGPT.</sub><br />
-  <sub>Small model. Big confidence.</sub>
+  <sub>Free of charge. Occasionally correct.</sub>
 </p>
