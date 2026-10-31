@@ -1,4 +1,13 @@
-export type ToolId = 'wikipedia' | 'github' | 'places' | 'weather' | 'ip' | 'currency' | 'website';
+export type ToolId =
+  | 'wikipedia'
+  | 'github'
+  | 'places'
+  | 'weather'
+  | 'ip'
+  | 'currency'
+  | 'website'
+  | 'calculator'
+  | 'datetime';
 export type ToolChoice = 'none' | 'auto' | ToolId;
 export interface Source {
   title: string;
@@ -44,6 +53,12 @@ export interface Prompt {
   content: string;
 }
 export interface ModelSession {
+  readonly contextUsage?: number;
+  readonly contextWindow?: number;
+  measureContextUsage?(
+    input: Prompt[] | string,
+    options?: { signal?: AbortSignal },
+  ): Promise<number>;
   prompt(
     input: Prompt[] | string,
     options?: { signal?: AbortSignal; responseConstraint?: object },

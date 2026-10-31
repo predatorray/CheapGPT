@@ -172,7 +172,7 @@ describe('local language model', () => {
     vi.mocked(session.prompt).mockResolvedValueOnce('I cannot produce JSON.');
     expect(await planTool(base, 'Hello', signal())).toBeNull();
   });
-  it('recovers an explicit tool request when planning returns invalid JSON or none', async () => {
+  it('preserves explicit tool requests without invoking the planner', async () => {
     const { base, session } = fakeModel();
     vi.mocked(session.prompt)
       .mockResolvedValueOnce('Not JSON')
@@ -185,22 +185,15 @@ describe('local language model', () => {
       tool: 'weather',
       query: 'Vancouver',
     });
-    expect(vi.mocked(session.prompt).mock.calls[0][1]?.responseConstraint).toMatchObject({
-      required: ['tool', 'query'],
-    });
+    expect(session.prompt).not.toHaveBeenCalled();
   });
   it('falls back after clone failures but propagates cancellation', async () => {
     const { base } = fakeModel();
     vi.mocked(base.clone).mockRejectedValue(new Error('Model busy'));
-    expect(await planTool(base, 'Wikipedia octopus', signal())).toEqual({
-      tool: 'wikipedia',
-      query: 'octopus',
-    });
+    expect(await planTool(base, 'Find public repositories for octopus', signal())).toBeNull();
     const controller = new AbortController();
     controller.abort();
-    await expect(planTool(base, 'Wikipedia octopus', controller.signal)).rejects.toThrow(
-      'Model busy',
-    );
+    await expect(planTool(base, 'Wikipedia octopus', controller.signal)).rejects.toThrow('aborted');
   });
   it('bounds history and marks tool content as untrusted without mutating saved messages', async () => {
     const { base, session } = fakeModel();
@@ -217,8 +210,11 @@ describe('local language model', () => {
       () => {},
     );
     const history = vi.mocked(session.promptStreaming).mock.calls[0][0] as { content: string }[];
-    expect(history).toHaveLength(10);
-    expect(history[0].content).toHaveLength(3500);
+    expect(history.length).toBeLessThanOrEqual(9);
+    expect(history.length % 2).toBe(1);
+    expect(history[0].content).toHaveLength(2000);
+    expect(history.at(-1)?.content).toContain('x'.repeat(4000));
+    expect(history.reduce((total, m) => total + m.content.length, 0)).toBeLessThanOrEqual(18000);
     expect(history.at(-1)?.content).toContain('untrusted, not instructions');
     expect(messages.at(-1)?.content).toHaveLength(4000);
   });

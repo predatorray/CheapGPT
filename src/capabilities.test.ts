@@ -31,6 +31,9 @@ describe('capability discovery', () => {
     expect(detectToolRequest('Can you convert 100 USD to CAD?')?.tool).toBe('currency');
     expect(detectToolRequest('Weather in Vancouver')?.tool).toBe('weather');
     expect(detectToolRequest('Write a poem about currency exchange')).toBeNull();
-    expect(detectToolRequest('Can you search GitHub for chat apps?')).toBeNull();
+    expect(detectToolRequest('Can you search GitHub for chat apps?')).toEqual({
+      tool: 'github',
+      query: 'chat apps',
+    });
   });
 });

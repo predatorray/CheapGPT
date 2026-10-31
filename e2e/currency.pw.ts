@@ -65,9 +65,7 @@ test('Just chat does not execute conversion tools', async ({ page }) => {
   expect(requests).toBe(0);
 });
 
-test('an available model cannot drop the amount or destination from an explicit conversion', async ({
-  page,
-}) => {
+test('an available model cannot rewrite a calculated conversion', async ({ page }) => {
   await page.evaluate(() => {
     let plannerCalls = 0;
     Object.defineProperty(window, 'plannerCalls', { get: () => plannerCalls });
@@ -93,9 +91,7 @@ test('an available model cannot drop the amount or destination from an explicit 
   await page.getByRole('textbox', { name: 'Message CheapGPT' }).fill('Convert 1 USD to CAD');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.locator('.source-card strong')).toHaveText('USD 1.00 = CAD 1.38');
-  await expect(page.locator('.assistant .message-content')).toContainText(
-    'See the calculated result below',
-  );
+  await expect(page.locator('.assistant .message-content')).toContainText('USD 1.00 = CAD 1.38');
   expect(
     await page.evaluate(() => (window as unknown as { plannerCalls: number }).plannerCalls),
   ).toBe(0);

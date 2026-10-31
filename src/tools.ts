@@ -2,6 +2,8 @@ import type { ToolId, ToolResult } from './types';
 import { calculateCurrencyConversion, extractCurrencyConversion } from './currency';
 import { readWebsite } from './website';
 import { CURRENT_IP_QUERY, isCurrentIpRequest } from './ip';
+import { calculationSummary } from './calculator';
+import { dateTimeSummary } from './datetime';
 
 export const toolInfo: {
   id: ToolId;
@@ -11,7 +13,30 @@ export const toolInfo: {
   provider: string;
   url: string;
   quota: string;
+  local?: boolean;
 }[] = [
+  {
+    id: 'calculator',
+    name: 'Calculator',
+    description: 'Let code do the arithmetic',
+    placeholder: 'Calculate (125 + 75) * 15%',
+    provider: 'Your device',
+    url: 'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number',
+    quota:
+      'Local arithmetic: +, -, *, /, ^, parentheses, and postfix %. Floating-point numbers; no code execution.',
+    local: true,
+  },
+  {
+    id: 'datetime',
+    name: 'Date & time',
+    description: 'Check the clock, without guessing',
+    placeholder: 'What is my timezone? Or local, UTC, America/Vancouver',
+    provider: 'Your device clock',
+    url: 'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat',
+    quota:
+      'Local device clock, browser time zone, UTC offset, and IANA time zones; no network requests. Browser settings do not verify your physical location.',
+    local: true,
+  },
   {
     id: 'website',
     name: 'Read website',
@@ -117,6 +142,8 @@ export async function runTool(
   signal: AbortSignal,
 ): Promise<ToolResult> {
   signal.throwIfAborted();
+  if (tool === 'calculator') return { tool, summary: calculationSummary(input), sources: [] };
+  if (tool === 'datetime') return { tool, summary: dateTimeSummary(input), sources: [] };
   if (tool === 'website') return readWebsite(input, signal);
   const query = input.trim().slice(0, 300);
   if (!query) throw new Error('Give this tool something to look up first.');
@@ -274,9 +301,7 @@ export async function runTool(
       /^(\d{1,3}\.){3}\d{1,3}$/.test(query) && query.split('.').every((n) => Number(n) <= 255);
     const v6 = query.includes(':') && /^[0-9a-f:]+$/i.test(query) && query.length <= 39;
     if (!current && !v4 && !v6)
-      throw new Error(
-        'Enter an explicit IPv4 or IPv6 address, or ask “What’s my IP address?”.',
-      );
+      throw new Error('Enter an explicit IPv4 or IPv6 address, or ask “What’s my IP address?”.');
     const data = await json<{
       success: boolean;
       message?: string;
@@ -286,9 +311,14 @@ export async function runTool(
       country: string;
       connection?: { isp: string };
       timezone?: { id: string };
-    }>(current ? 'https://ipwho.is/' : `https://ipwho.is/${encodeURIComponent(query)}`, signal, !current);
+    }>(
+      current ? 'https://ipwho.is/' : `https://ipwho.is/${encodeURIComponent(query)}`,
+      signal,
+      !current,
+    );
     if (!data.success) throw new Error(data.message || 'This address could not be looked up.');
-    if (typeof data.ip !== 'string' || !data.ip.trim()) throw new Error('The IP service returned no address. No IP address has been guessed.');
+    if (typeof data.ip !== 'string' || !data.ip.trim())
+      throw new Error('The IP service returned no address. No IP address has been guessed.');
     return {
       tool,
       summary: current

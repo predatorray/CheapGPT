@@ -45,6 +45,8 @@ import {
   TuneRounded,
   PublicRounded,
   CurrencyExchangeRounded,
+  CalculateOutlined,
+  ScheduleOutlined,
 } from '@mui/icons-material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -65,6 +67,8 @@ import type {
 } from './types';
 
 const toolIcons = {
+  calculator: <CalculateOutlined />,
+  datetime: <ScheduleOutlined />,
   website: <LanguageRounded />,
   wikipedia: <LanguageRounded />,
   github: <GitHub />,
@@ -308,6 +312,24 @@ export default function App() {
     let content = '';
     let result: ToolResult | undefined;
     try {
+      const explicit = detectToolRequest(prompt);
+      let request: ToolRequest | null = isConcreteTool
+        ? { tool: tool as ToolId, query: prompt }
+        : tool === 'auto'
+          ? explicit
+          : null;
+      if (explicit?.tool === 'rename_conversation' || explicit?.tool === 'capabilities')
+        request = explicit;
+      const directAnswer =
+        request &&
+        [
+          'calculator',
+          'datetime',
+          'currency',
+          'ip',
+          'rename_conversation',
+          'capabilities',
+        ].includes(request.tool);
       let model = base.current;
       let startupError = '';
       if (
@@ -315,7 +337,7 @@ export default function App() {
         window.LanguageModel &&
         !needsHttps &&
         status !== 'unavailable' &&
-        !['rename_conversation', 'capabilities'].includes(detectToolRequest(prompt)?.tool || '')
+        !directAnswer
       ) {
         setPhase('Acquiring a few brain cells');
         try {
@@ -327,15 +349,9 @@ export default function App() {
         }
       }
       abort.signal.throwIfAborted();
-      let request: ToolRequest | null = isConcreteTool
-        ? { tool: tool as ToolId, query: prompt }
-        : null;
-      const explicit = detectToolRequest(prompt);
-      if (explicit?.tool === 'rename_conversation' || explicit?.tool === 'capabilities')
-        request = explicit;
-      else if (tool === 'auto') {
+      if (!request && tool === 'auto') {
         setPhase('Negotiating with the tool department');
-        request = model ? await planTool(model, prompt, abort.signal) : detectToolRequest(prompt);
+        request = model ? await planTool(model, prompt, abort.signal, messages) : explicit;
       }
       if (request?.tool === 'capabilities') {
         updateMessage(chatId, assistant.id, { content: capabilitySummary() });
@@ -353,13 +369,19 @@ export default function App() {
         return;
       }
       if (request) {
-        setPhase(`Borrowing facts from ${toolInfo.find((t) => t.id === request!.tool)?.name}`);
+        const info = toolInfo.find((t) => t.id === request!.tool);
+        setPhase(
+          info?.local ? `Using ${info.name} on your device` : `Borrowing facts from ${info?.name}`,
+        );
         result = await runTool(request.tool, request.query, abort.signal);
         updateMessage(chatId, assistant.id, { result });
       }
       abort.signal.throwIfAborted();
       setPhase('');
-      if (result?.unavailable || result?.tool === 'ip') {
+      if (
+        result &&
+        (result.unavailable || ['ip', 'currency', 'calculator', 'datetime'].includes(result.tool))
+      ) {
         content = result.summary;
       } else if (model) {
         await streamReply(model, history, result, abort.signal, (chunk) => {
@@ -395,11 +417,11 @@ export default function App() {
         });
       else
         updateMessage(chatId, assistant.id, {
-          content:
-            content ||
-            (result
+          content: content
+            ? `${content}\n\nResponse incomplete: ${error instanceof Error ? error.message : 'The local model stopped unexpectedly.'}`
+            : result
               ? `${result.summary}\n\nThe local model stumbled, but the source results are below.`
-              : `Well, that was ambitious. ${error instanceof Error ? error.message : 'Something went wrong.'} ${!window.LanguageModel || needsHttps || status === 'unavailable' ? 'Public tools still work: try “Weather in Vancouver” or choose a tool from the menu.' : 'Try sending another message.'}`),
+              : `Well, that was ambitious. ${error instanceof Error ? error.message : 'Something went wrong.'} ${!window.LanguageModel || needsHttps || status === 'unavailable' ? 'Public tools still work: try “Weather in Vancouver” or choose a tool from the menu.' : 'Try sending another message.'}`,
           error: true,
           elapsed: (performance.now() - start) / 1000,
         });
@@ -671,8 +693,10 @@ export default function App() {
                       <div className="source-heading">
                         {toolIcons[message.result.tool]}
                         <span>
-                          {toolInfo.find((t) => t.id === message.result!.tool)?.name} · Public
-                          sources
+                          {toolInfo.find((t) => t.id === message.result!.tool)?.name} ·{' '}
+                          {toolInfo.find((t) => t.id === message.result!.tool)?.local
+                            ? 'On your device'
+                            : 'Public sources'}
                         </span>
                       </div>
                       {message.result.sources.map((source, n) => (
@@ -796,7 +820,9 @@ export default function App() {
                     {status === 'ready'
                       ? 'Brainpower: local'
                       : isConcreteTool
-                        ? 'Public data, no AI needed'
+                        ? toolInfo.find((t) => t.id === tool)?.local
+                          ? 'On your device, no AI needed'
+                          : 'Public data, no AI needed'
                         : 'No cloud. No bill.'}
                   </span>
                 </div>
@@ -826,7 +852,7 @@ export default function App() {
                 {
                   id: 'auto',
                   name: 'Let the tiny brain choose',
-                  description: 'AI chooses one public tool when useful',
+                  description: 'Local utilities and public lookups when useful',
                 },
                 ...toolInfo,
               ].map((item) => (
@@ -1018,10 +1044,10 @@ export default function App() {
         </DialogTitle>
         <DialogContent>
           <p>
-            “Just chat” sends no prompts to any service. Selecting a tool sends your search text to
-            that provider, which also sees your IP address. Auto tools is on by default: local AI
-            chooses a tool when useful, with a fallback for explicit requests such as “weather in
-            Vancouver” if AI is unavailable. The full conversation is never sent to a tool.
+            “Just chat” sends no prompts to any service. Calculator and Date & time run entirely on
+            your device. Public lookup tools send a search query to their provider, which also sees
+            your IP address. Auto tools handles explicit requests directly and lets local AI choose
+            one lookup for other requests. The full conversation is never sent to a provider.
           </p>
           <p>
             Choose a tool for an exact lookup, even without AI. No keys, accounts, or paid services.
@@ -1041,9 +1067,10 @@ export default function App() {
             </div>
           ))}
           <p className="credits">
-            Tool results are cached for five minutes in memory. For weather and IP lookups, enter an
-            an explicit city or IP address, or ask for your own public IP. Caller-IP detection runs only when requested and is not cached; we never request device geolocation. No analytics or tracking
-            scripts.
+            Public lookup results are cached for five minutes in memory. Calculator and Date & time
+            always run afresh locally. For weather and IP lookups, enter an explicit city or IP
+            address, or ask for your own public IP. Caller-IP detection runs only when requested and
+            is not cached; we never request device geolocation. No analytics or tracking scripts.
           </p>
         </DialogContent>
       </Dialog>

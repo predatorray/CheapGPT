@@ -1,6 +1,6 @@
 import { toolInfo } from './tools';
 
-// Read the installed public-tool registry so newly installed tools appear automatically.
+// Read the installed tool registry so newly installed tools appear automatically.
 export function listCapabilities() {
   return [
     ...toolInfo.map((tool) => ({
@@ -43,7 +43,7 @@ export function isCapabilityQuestion(input: string) {
       text,
     ) ||
     (/^(?:(?:please|hi|hey)[, ]+)?(?:can|could|are|do) you\b/i.test(text) &&
-      /\b(?:capable|able|support|have access|tools?|capabilities|currency|exchange|convert|weather|forecast|wikipedia|github|repositories|openstreetmap|places|ip lookup|rename|title)\b/i.test(
+      /\b(?:capable|able|support|have access|tools?|capabilities|calculator|arithmetic|time zones?|currency|exchange|convert|weather|forecast|wikipedia|github|repositories|openstreetmap|places|ip lookup|rename|title)\b/i.test(
         text,
       ))
   );

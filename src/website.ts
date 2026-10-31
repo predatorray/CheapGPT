@@ -4,7 +4,7 @@ export function websiteUrl(input: string): string | null {
   const match = input
     .trim()
     .match(
-      /^(?:(?:please\s+)?(?:read|open|visit|browse|summarize|navigate to)\s+(?:the\s+(?:website|page)\s+)?(?:at\s+)?)?(https?:\/\/\S+)$/i,
+      /^(?:(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:read|open|visit|browse|summarize|navigate to)\s+(?:the\s+(?:website|page)\s+)?(?:at\s+)?)?(https?:\/\/\S+)$/i,
     );
   if (!match) return null;
   try {
