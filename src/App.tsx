@@ -917,6 +917,17 @@ export default function App() {
               CheapGPT can make mistakes. It’s kind of the brand.{' '}
               <span>Double-check the important stuff.</span>
             </p>
+            <footer className="copyright-footer">
+              <span>© {new Date().getFullYear()} Wenhao Ji</span>
+              <span aria-hidden="true">·</span>
+              <a
+                href="https://github.com/predatorray/CheapGPT"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                GitHub repository
+              </a>
+            </footer>
           </div>
         </div>
       </main>

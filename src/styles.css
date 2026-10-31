@@ -637,6 +637,31 @@ h1 > span {
 .disclaimer > span {
   color: #afb39f;
 }
+.copyright-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 12px 8px;
+  color: #717b64;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+.copyright-footer a {
+  color: #4e6b3a;
+  text-underline-offset: 3px;
+}
+.copyright-footer a:hover {
+  color: #304723;
+}
+.copyright-footer a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 .page-footer {
   display: flex;
   justify-content: space-between;
