@@ -62,6 +62,12 @@ export function TaskPanel({ task }: { task: TaskSnapshot }) {
         {task.planningCalls !== undefined && (
           <p className="task-model-calls">Local AI planning calls: {task.planningCalls}</p>
         )}
+        {task.intent ? (
+          <details>
+            <summary>Local AI resolved request</summary>
+            <pre>{JSON.stringify(task.intent, null, 2)}</pre>
+          </details>
+        ) : null}
         {task.scope ? (
           <details>
             <summary>Local AI scope</summary>

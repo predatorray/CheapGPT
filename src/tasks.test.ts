@@ -22,6 +22,8 @@ const csv: LocalDocument = {
   table: parseCsv('Team,Amount\nA,12\nB,4\nA,8'),
 };
 function fakeModel(actions: unknown[]) {
+  let pendingIntent: string | undefined;
+  let pendingProcedures: { resolvedRequest: string }[] = [];
   let pendingArgs: unknown;
 
   let pendingOutline: unknown;
@@ -31,6 +33,38 @@ function fakeModel(actions: unknown[]) {
     clone: vi.fn(),
     destroy: vi.fn(),
     prompt: vi.fn(async (input) => {
+      if (typeof input === 'string' && input.startsWith('Resolve this conversational request')) {
+        pendingProcedures = JSON.parse(
+          input.split('Earlier tasks, oldest first: ')[1].split('\nCurrent message: ')[0],
+        );
+        const intent = actions[0] as { action?: string; mode?: string; request?: string };
+        if (intent?.action === 'intent') {
+          pendingIntent = intent.request;
+          actions.shift();
+          return JSON.stringify({ mode: intent.mode, request: intent.request });
+        }
+        return JSON.stringify({
+          mode: /p\d+/.test(JSON.stringify(actions)) ? 'use_results' : 'independent',
+          request: JSON.parse(input.split('Current message: ')[1].split('\nOutput only JSON.')[0]),
+        });
+      }
+      if (typeof input === 'string' && input.startsWith('Edit a previous procedure')) {
+        if ((actions[0] as { action?: string })?.action === 'patch') {
+          const { action: _, ...patch } = actions.shift() as Record<string, unknown>;
+          return JSON.stringify(patch);
+        }
+        const review = actions[0] as { action?: string; request?: string };
+        if (review?.action === 'intent_review') {
+          actions.shift();
+          pendingIntent = review.request;
+        }
+        const baseTask = pendingProcedures.length - 1;
+        return JSON.stringify({
+          baseTask,
+          edits: [{ before: pendingProcedures[baseTask].resolvedRequest, after: pendingIntent }],
+          append: '',
+        });
+      }
       if (typeof input === 'string' && input.startsWith('Does THIS user message')) {
         pendingScope = {
           fileRequested:
@@ -221,7 +255,7 @@ describe('structured chaining', () => {
     expect(() => validate(schema, {})).toThrow();
   });
   it('runs a model-directed two-tool chain and includes numbers in final-answer evidence', async () => {
-    const outcome = await task('Do two calculations in order', [
+    const outcome = await task('Calculate 12 * 7, divide by 3', [
       { action: 'call', tool: 'calculator.evaluate', args: { expression: '12 * 7' } },
       {
         action: 'call',
@@ -303,7 +337,11 @@ describe('structured chaining', () => {
   });
   it('detects repeated calls and enforces the call budget', async () => {
     const duplicate = { action: 'call', tool: 'calculator.evaluate', args: { expression: '2+2' } };
-    const repeated = await task('Compare calculations', [duplicate, duplicate, duplicate]);
+    const repeated = await task('Calculate 2+2, then calculate 2+2, then calculate 2+2', [
+      duplicate,
+      duplicate,
+      duplicate,
+    ]);
     expect(repeated.snapshot.steps).toHaveLength(1);
     expect(repeated.snapshot.status).toBe('partial');
     const bounded = await task(
@@ -985,5 +1023,321 @@ describe('dates and generated files', () => {
     const message = loadConversations()[0].messages[0];
     expect(message.task?.status).toBe('stopped');
     expect(message.task?.steps[0].result?.artifact?.name).toBe('test.json');
+  });
+});
+
+describe('conversational multi-tool integration', () => {
+  const history = (snapshot: TaskSnapshot): Message[] => [
+    { id: 'prior', role: 'assistant', content: 'Completed', task: snapshot },
+  ];
+  const chain = (amount: number, tax: number, people: number) => [
+    { action: 'call', tool: 'currency.convert', args: { amount, from: 'USD', to: 'CAD' } },
+    {
+      action: 'call',
+      tool: 'calculator.adjust',
+      args: { operation: 'add_percent', operand: tax, label: 'With tax' },
+    },
+    {
+      action: 'call',
+      tool: 'calculator.adjust',
+      args: { operation: 'divide', operand: people, label: 'Per person' },
+    },
+  ];
+  it('replays repeated revisions from the resolved procedure, never a prior numeric answer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(reply({ base: 'USD', date: '2026-10-30', rates: { CAD: 1.375 } })),
+    );
+    let result = await task(
+      'Convert 250 USD to CAD, add 12% tax, split between 3 people',
+      chain(250, 12, 3),
+    );
+    for (const [message, amount, tax, people] of [
+      ['I have another bill which is 300 USD. do it again.', 300, 12, 3],
+      ['Make that 480 USD with 5% tax for 4 people.', 480, 5, 4],
+      ['Same again, but 1000 USD and 8 people.', 1000, 5, 8],
+    ] as const) {
+      const request = `Convert ${amount} USD to CAD, add ${tax}% tax, split between ${people} people`;
+      const previous = result.snapshot;
+      result = await task(
+        message,
+        [{ action: 'intent', mode: 'replay', request }, ...chain(amount, tax, people)],
+        { messages: history(previous) },
+      );
+      expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+      expect(result.snapshot.goal).toBe(message);
+      expect(result.snapshot.intent?.request).toBe(request);
+      expect(result.useHistory).toBe(false);
+      expect(result.snapshot.steps[2].result?.data).toMatchObject({
+        value: (amount * 1.375 * (1 + tax / 100)) / people,
+        currency: 'CAD',
+        inputResultId: 'r2',
+      });
+      const intentCall = vi
+        .mocked(result.session.prompt)
+        .mock.calls.find(([input]) =>
+          String(input).startsWith('Resolve this conversational request'),
+        );
+      expect(String(intentCall?.[0])).toContain(previous.intent?.request || previous.goal);
+    }
+  });
+  it.each([
+    {
+      goal: 'Calculate 80 * 6, subtract 10%, divide by 4',
+      followup: 'Repeat for 120 instead of 80.',
+      request: 'Calculate 120 * 6, subtract 10%, divide by 4',
+      value: 162,
+    },
+    {
+      goal: 'Calculate 80 * 6, subtract 10%, divide by 4',
+      followup: 'Use 120 and divide by 8 instead.',
+      request: 'Calculate 120 * 6, subtract 10%, divide by 8',
+      value: 81,
+    },
+  ])('replays non-currency chains: $followup', async ({ goal, followup, request, value }) => {
+    const prior: TaskSnapshot = {
+      goal,
+      status: 'complete',
+      instructions: goal.split(', '),
+      steps: [],
+    };
+    const people = request.endsWith('8') ? 8 : 4;
+    const result = await task(
+      followup,
+      [
+        { action: 'intent', mode: 'replay', request },
+        {
+          action: 'call',
+          tool: 'calculator.evaluate',
+          args: { expression: '120*6', label: 'Base' },
+        },
+        {
+          action: 'call',
+          tool: 'calculator.adjust',
+          args: { operation: 'subtract_percent', operand: 10, label: 'Discount' },
+        },
+        {
+          action: 'call',
+          tool: 'calculator.adjust',
+          args: { operation: 'divide', operand: people, label: 'Share' },
+        },
+      ],
+      { messages: history(prior) },
+    );
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.steps[2].result?.data).toMatchObject({ value });
+  });
+  it('chains table aggregation, exact result arithmetic and export without a model copying values', async () => {
+    const result = await task(
+      'Sum Amount by Team, divide the first total by 4 and export as JSON',
+      [
+        {
+          action: 'call',
+          tool: 'table.query',
+          args: {
+            documentId: csv.id,
+            aggregate: { operation: 'sum', column: 'Amount', groupBy: 'Team' },
+          },
+        },
+        {
+          action: 'call',
+          tool: 'calculator.evaluate',
+          args: { expression: 'r1.table.rows.0.1 / 4', label: 'Share' },
+        },
+        {
+          action: 'call',
+          tool: 'file.export_results',
+          args: { name: 'share', format: 'json', resultIds: ['r2'] },
+        },
+      ],
+      { documents: [csv] },
+    );
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.steps[1].result?.data).toMatchObject({ value: 5 });
+    expect(result.snapshot.steps[2].result?.artifact?.content).toContain('"value": 5');
+  });
+  it.each(['$r1.value * 2', 'r1.value * 2'])(
+    'accepts numeric result references in expressions: %s',
+    async (expression) => {
+      const result = await task('Calculate 6 + 4, multiply by 2', [
+        { action: 'call', tool: 'calculator.evaluate', args: { expression: '6+4', label: 'Base' } },
+        { action: 'call', tool: 'calculator.evaluate', args: { expression, label: 'Doubled' } },
+      ]);
+      expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+      expect(result.snapshot.steps[1].result?.data).toMatchObject({ value: 20 });
+    },
+  );
+  it('rejects a replay that drops the new input before executing tools', async () => {
+    const prior: TaskSnapshot = { goal: 'Calculate 250 * 2', status: 'complete', steps: [] };
+    const result = await task(
+      'Repeat for 300.',
+      [{ action: 'intent', mode: 'replay', request: 'Calculate 250 * 2' }, ...chain(250, 12, 3)],
+      { messages: history(prior) },
+    );
+    expect(result.snapshot.status).toBe('partial');
+    expect(result.snapshot.note).toContain('preserve the new inputs');
+    expect(result.snapshot.steps).toEqual([]);
+  });
+});
+
+describe('cross-domain dependencies and saved intent', () => {
+  it('chains date arithmetic, timezone display and exact JSON export', async () => {
+    const result = await task(
+      'Add 2 hours to 2026-11-01T00:30:00-07:00, display in America/Vancouver and export as JSON',
+      [
+        {
+          action: 'call',
+          tool: 'date.calculate',
+          args: { start: '2026-11-01T00:30:00-07:00', amount: 2, unit: 'hours' },
+        },
+        {
+          action: 'call',
+          tool: 'date.convert',
+          args: { instant: { $ref: 'r1.instant' }, timeZone: 'America/Vancouver' },
+        },
+        {
+          action: 'call',
+          tool: 'file.export_results',
+          args: { name: 'time', format: 'json', resultIds: ['r2'] },
+        },
+      ],
+    );
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.steps[1].result?.data).toMatchObject({
+      instant: '2026-11-01T09:30:00.000Z',
+      timeZone: 'America/Vancouver',
+    });
+    expect(result.snapshot.steps[2].result?.artifact?.content).toContain(
+      '2026-11-01T09:30:00.000Z',
+    );
+  });
+  it('exports an existing answer without replaying its procedure', async () => {
+    const prior = await task('Calculate 12 * 7, divide by 3', [
+      { action: 'call', tool: 'calculator.evaluate', args: { expression: '12*7', label: 'Base' } },
+      {
+        action: 'call',
+        tool: 'calculator.adjust',
+        args: { operation: 'divide', operand: 3, label: 'Share' },
+      },
+    ]);
+    const result = await task(
+      'Export that answer as JSON',
+      [
+        { action: 'intent', mode: 'use_results', request: 'Export that answer as JSON' },
+        {
+          action: 'call',
+          tool: 'file.export_results',
+          args: { name: 'answer', format: 'json', resultIds: ['p2'] },
+        },
+      ],
+      { messages: [{ id: 'a', role: 'assistant', content: '28', task: prior.snapshot }] },
+    );
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.useHistory).toBe(true);
+    expect(result.snapshot.steps.map((step) => step.tool)).toEqual(['file.export_results']);
+    expect(result.snapshot.steps[0].result?.artifact?.content).toContain('"value": 28');
+  });
+  it('retains resolved procedures across saving and reloading conversation history', () => {
+    const memory = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => memory.set(key, value),
+      removeItem: (key: string) => memory.delete(key),
+    });
+    const task: TaskSnapshot = {
+      goal: 'Again for 300.',
+      intent: { mode: 'replay', request: 'Calculate 300 * 2, divide by 4' },
+      status: 'complete',
+      steps: [],
+    };
+    saveConversations([
+      {
+        id: 'chat',
+        title: 'Test',
+        updatedAt: 1,
+        messages: [{ id: 'a', role: 'assistant', content: 'Done', task }],
+      },
+    ]);
+    expect(loadConversations()[0].messages[0].task?.intent).toEqual(task.intent);
+  });
+});
+
+describe('intent and atomic binding checks', () => {
+  it('executes the model-reviewed override rather than a stale first proposal', async () => {
+    const prior: TaskSnapshot = {
+      goal: 'Calculate 250 * 2, divide by 4',
+      status: 'complete',
+      steps: [],
+    };
+    const result = await task(
+      'Again for 300.',
+      [
+        { action: 'intent', mode: 'replay', request: prior.goal },
+        { action: 'intent_review', request: 'Calculate 300 * 2, divide by 4' },
+        {
+          action: 'call',
+          tool: 'calculator.evaluate',
+          args: { expression: '300*2', label: 'Base' },
+        },
+        {
+          action: 'call',
+          tool: 'calculator.adjust',
+          args: { operation: 'divide', operand: 4, label: 'Share' },
+        },
+      ],
+      { messages: [{ id: 'a', role: 'assistant', content: '125', task: prior }] },
+    );
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.intent?.request).toBe('Calculate 300 * 2, divide by 4');
+    expect(result.snapshot.steps[1].result?.data).toMatchObject({ value: 150 });
+  });
+  it('rejects two alternative calculators bound to a single atomic operation', async () => {
+    const { base, session } = fakeModel([
+      { action: 'call', tool: 'calculator.evaluate', args: { expression: '2+2', label: 'Sum' } },
+    ]);
+    const prompt = vi.mocked(session.prompt).getMockImplementation()!;
+    vi.mocked(session.prompt).mockImplementation(async (input, options) => {
+      if (typeof input === 'string' && input.startsWith('Bind tools'))
+        return JSON.stringify({
+          steps: [
+            { tool: 'calculator.evaluate', purpose: 'Sum' },
+            { tool: 'calculator.adjust', purpose: 'Sum again' },
+          ],
+        });
+      return prompt(input, options);
+    });
+    const result = await runTask({
+      goal: 'Calculate 2+2',
+      model: base,
+      documents: [],
+      messages: [],
+      signal: signal(),
+      onUpdate: () => {},
+    });
+    expect(result.snapshot.status).toBe('partial');
+    expect(result.snapshot.steps).toEqual([]);
+  });
+});
+
+describe('calculator input scope', () => {
+  it('offers literal inputs initially and only real numeric references after execution', async () => {
+    const result = await task('Calculate 6 + 4, multiply by 2', [
+      { action: 'call', tool: 'calculator.evaluate', args: { expression: '6+4', label: 'Base' } },
+      {
+        action: 'call',
+        tool: 'calculator.evaluate',
+        args: { expression: '$r1.value * 2', label: 'Doubled' },
+      },
+    ]);
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    const prompts = vi
+      .mocked(result.session.prompt)
+      .mock.calls.map(([input]) => String(input))
+      .filter((input) => input.startsWith('Generate arguments'));
+    expect(prompts[0]).toContain('NO completed results or valid references');
+    expect(prompts[0]).not.toContain('$r1');
+    expect(prompts[1]).toContain('"reference":"$r1.value","value":10');
+    expect(prompts[1]).not.toContain('$r2');
+    expect(result.snapshot.steps[1].result?.data).toMatchObject({ value: 20 });
   });
 });

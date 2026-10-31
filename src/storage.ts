@@ -72,6 +72,12 @@ function savedTask(data: unknown): TaskSnapshot | undefined {
   if (!data || typeof data !== 'object') return undefined;
   const task = data as TaskSnapshot;
   if (
+    (task.intent !== undefined &&
+      (!task.intent ||
+        !['independent', 'replay', 'use_results'].includes(task.intent.mode) ||
+        typeof task.intent.request !== 'string' ||
+        !task.intent.request.trim() ||
+        task.intent.request.length > 4000)) ||
     (task.instructions !== undefined &&
       (!Array.isArray(task.instructions) ||
         task.instructions.length > 7 ||

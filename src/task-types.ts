@@ -30,6 +30,7 @@ export interface TaskStep extends TaskCall {
 export interface TaskSnapshot {
   goal: string;
   workflow?: string;
+  intent?: { mode: 'independent' | 'replay' | 'use_results'; request: string };
   planningCalls?: number;
   instructions?: string[];
   scope?: { fileRequested: boolean; useHistory: boolean; groups: string[] };

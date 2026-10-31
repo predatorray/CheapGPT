@@ -11,6 +11,8 @@ export async function model(
     ({ actions, final, stall }) => {
       const calls = { plans: [] as string[], replies: [] as unknown[], creates: 0 };
       Object.assign(window, { taskTestCalls: calls });
+      let pendingIntent: string | undefined;
+      let pendingProcedures: { resolvedRequest: string }[] = [];
       let pendingArgs: unknown;
       let pendingOutline: unknown;
       let workPartsRemaining = 0;
@@ -21,6 +23,42 @@ export async function model(
         destroy: () => {},
         prompt: async (input: string) => {
           calls.plans.push(input);
+          if (input.startsWith('Resolve this conversational request')) {
+            pendingProcedures = JSON.parse(
+              input.split('Earlier tasks, oldest first: ')[1].split('\nCurrent message: ')[0],
+            );
+            const intent = actions[0] as { action?: string; mode?: string; request?: string };
+            if (intent?.action === 'intent') {
+              pendingIntent = intent.request;
+              actions.shift();
+              return JSON.stringify({ mode: intent.mode, request: intent.request });
+            }
+            return JSON.stringify({
+              mode: 'independent',
+              request: JSON.parse(
+                input.split('Current message: ')[1].split('\nOutput only JSON.')[0],
+              ),
+            });
+          }
+          if (typeof input === 'string' && input.startsWith('Edit a previous procedure')) {
+            if ((actions[0] as { action?: string })?.action === 'patch') {
+              const { action: _, ...patch } = actions.shift() as Record<string, unknown>;
+              return JSON.stringify(patch);
+            }
+            const review = actions[0] as { action?: string; request?: string };
+            if (review?.action === 'intent_review') {
+              actions.shift();
+              pendingIntent = review.request;
+            }
+            const baseTask = pendingProcedures.length - 1;
+            return JSON.stringify({
+              baseTask,
+              edits: [
+                { before: pendingProcedures[baseTask].resolvedRequest, after: pendingIntent },
+              ],
+              append: '',
+            });
+          }
           if (input.startsWith('Does THIS user message')) {
             pendingScope = {
               fileRequested: actions

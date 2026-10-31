@@ -212,3 +212,83 @@ test('Stop preserves completed calculations during final model drafting', async 
   await expect(page.getByLabel('Task progress')).toContainText('stopped');
   await expect(page.getByLabel('Task progress')).toContainText('84');
 });
+
+// These exercise the browser orchestration contract with explicit model decisions.
+// Real Nano quality is checked separately in connected Chrome.
+for (const scenario of [
+  {
+    message: 'I have another bill which is 300 USD. do it again.',
+    amount: 300,
+    tax: 12,
+    people: 3,
+    csv: false,
+  },
+  {
+    message: 'Do the same for 480 USD, but use 5% tax and 4 people.',
+    amount: 480,
+    tax: 5,
+    people: 4,
+    csv: false,
+  },
+  {
+    message: 'Repeat for 1000 USD, use 13% tax and 8 people, and export as CSV.',
+    amount: 1000,
+    tax: 13,
+    people: 8,
+    csv: true,
+  },
+]) {
+  test(`replays a multi-tool procedure: ${scenario.message}`, async ({ page }) => {
+    const chain = (amount: number, tax: number, people: number) => [
+      call('currency.convert', { amount, from: 'USD', to: 'CAD' }),
+      call('calculator.adjust', { operation: 'add_percent', operand: tax, label: 'Including tax' }),
+      call('calculator.adjust', { operation: 'divide', operand: people, label: 'Per person' }),
+    ];
+    const request = `Convert ${scenario.amount} USD to CAD, add ${scenario.tax}% tax, split between ${scenario.people} people${scenario.csv ? ' and export as CSV.' : ''}`;
+    await model(page, [
+      ...chain(250, 12, 3),
+      finish,
+      { action: 'intent', mode: 'replay', request },
+      {
+        action: 'patch',
+        baseTask: 0,
+        edits: [
+          { before: '250 USD', after: `${scenario.amount} USD` },
+          { before: '12% tax', after: `${scenario.tax}% tax` },
+          { before: '3 people', after: `${scenario.people} people` },
+        ],
+        append: scenario.csv ? 'and export as CSV.' : '',
+      },
+      ...chain(scenario.amount, scenario.tax, scenario.people),
+      ...(scenario.csv
+        ? [call('file.export_results', { name: 'repeat', format: 'csv', resultIds: ['r3'] })]
+        : []),
+      finish,
+    ]);
+    await page.route('https://api.frankfurter.dev/**', (route) =>
+      route.fulfill({ json: { base: 'USD', date: '2026-10-30', rates: { CAD: 1.375 } } }),
+    );
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await send(page, 'Convert 250 USD to CAD, add 12% tax, split between 3 people');
+    await send(page, scenario.message);
+    const panel = page.getByLabel('Task progress').last();
+    await expect(panel).toContainText(`complete · ${scenario.csv ? '4/4' : '3/3'}`);
+    await panel.locator('summary').first().click();
+    await panel.getByText('Local AI resolved request', { exact: true }).click();
+    await expect(panel).toContainText(request);
+    const observed = await calls(page);
+    const lastReply = (observed.replies.at(-1) as { content: string }[])
+      .map((message) => message.content)
+      .join('\n');
+    expect(lastReply).toContain(
+      String((scenario.amount * 1.375 * (1 + scenario.tax / 100)) / scenario.people),
+    );
+    expect(lastReply).toContain('"currency":"CAD"');
+    expect(lastReply).not.toContain('p1');
+    if (scenario.csv) {
+      const download = page.waitForEvent('download');
+      await page.getByRole('button', { name: 'Download repeat.csv' }).click();
+      expect(await readFile((await (await download).path())!, 'utf8')).toContain('CAD 194.22');
+    }
+  });
+}
