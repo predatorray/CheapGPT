@@ -78,6 +78,13 @@ function savedTask(data: unknown): TaskSnapshot | undefined {
         typeof task.intent.request !== 'string' ||
         !task.intent.request.trim() ||
         task.intent.request.length > 4000)) ||
+    (task.conversational !== undefined && typeof task.conversational !== 'boolean') ||
+    (task.responseInstructions !== undefined &&
+      (!Array.isArray(task.responseInstructions) ||
+        task.responseInstructions.length > 7 ||
+        task.responseInstructions.some(
+          (instruction) => typeof instruction !== 'string' || instruction.length > 500,
+        ))) ||
     (task.instructions !== undefined &&
       (!Array.isArray(task.instructions) ||
         task.instructions.length > 7 ||

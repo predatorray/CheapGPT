@@ -145,7 +145,7 @@ describe('local language model', () => {
     expect(chunks.join('')).toBe('Hello, world.');
     expect(base.clone).toHaveBeenCalledTimes(1);
     expect(session.promptStreaming).toHaveBeenCalledWith(
-      [{ role: 'user', content: 'Hello' }],
+      [{ role: 'user', content: expect.stringContaining('Hello') }],
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(destroy).toHaveBeenCalledTimes(1);

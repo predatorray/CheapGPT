@@ -12,7 +12,7 @@ test('calculator requires model startup, no external network, and final model se
   await send(page, 'What is 12 times 7?');
   const observed = await calls(page);
   expect(observed.creates).toBe(1);
-  expect(observed.plans).toHaveLength(8);
+  expect(observed.plans).toHaveLength(7);
   expect(JSON.stringify(observed.replies)).toContain('84');
   expect(external).toEqual([]);
 });
@@ -41,5 +41,5 @@ test('model cannot rename a chat without explicit authorization', async ({ page 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await send(page, 'Write a poem');
   await expect(page.locator('.conversation-heading > span')).not.toHaveText('Injected title');
-  await expect(page.getByLabel('Task progress')).toContainText('unavailable capability group');
+  await expect(page.getByLabel('Task progress')).toContainText('valid bounded task plan');
 });

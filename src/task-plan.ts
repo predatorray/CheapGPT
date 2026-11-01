@@ -11,14 +11,19 @@ export function sourceInstructions(goal: string, purposes: string[]): string[] {
   );
   const ends = purposes.map(() => -1);
   let cursor = 0;
+  let anchored = false;
   for (const token of source) {
     const position = proposed.findIndex(
       (candidate, index) => index >= cursor && candidate.word === token[0].toLowerCase(),
     );
+    // The first source span also owns introductory wording omitted from a
+    // model's action label. It is copied into execution, never discarded.
+    if (position < 0 && !anchored) continue;
     if (position < 0)
       throw new Error(
         `The decomposition omitted or changed ${JSON.stringify(goal.slice(token.index))}.`,
       );
+    anchored = true;
     let end = token.index! + token[0].length;
     while (end < goal.length && !/\s/.test(goal[end])) end++;
     ends[proposed[position].step] = end;
@@ -58,4 +63,23 @@ export function applyReplayEdits(
   for (const edit of edits.reverse())
     request = request.slice(0, edit.start) + edit.after + request.slice(edit.end);
   return (request + (append ? ' ' + append : '')).trim();
+}
+
+// A small source-only grammar makes short-plan repairs incapable of copying a
+// prompt example. Longer requests keep the bounded free-text repair protocol.
+export function sourceQuotes(text: string, budget = 6000): string[] | undefined {
+  const words = [...text.matchAll(/\S+/g)];
+  const quotes = new Set<string>();
+  let size = 0;
+  for (let start = 0; start < words.length; start++)
+    for (let end = start; end < words.length; end++) {
+      const quote = text.slice(words[start].index!, words[end].index! + words[end][0].length);
+      if (quote.length > 500) break;
+      if (!quotes.has(quote)) {
+        size += quote.length;
+        if (size > budget) return;
+        quotes.add(quote);
+      }
+    }
+  return quotes.size ? [...quotes].sort((a, b) => b.length - a.length) : undefined;
 }

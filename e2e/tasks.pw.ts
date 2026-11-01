@@ -77,7 +77,7 @@ test('different amount, tax and split finish without an unrequested file', async
   expect((observed.replies[0] as { content: string }[]).at(-1)?.content).toContain(
     '"currency":"CAD"',
   );
-  expect(observed.plans).toHaveLength(15);
+  expect(observed.plans).toHaveLength(12);
 });
 
 test('no local model means no hidden currency workflow', async ({ page }) => {

@@ -27,6 +27,7 @@ const labels: Record<string, string> = {
   'date.calculate': 'Calculate date',
   'date.convert': 'Convert timezone',
   'file.create': 'Prepare download',
+  'file.export_current': 'Export current result',
   'file.export_results': 'Export completed results',
   'weather.forecast': 'Check forecast',
   'places.search': 'Find place',
@@ -82,6 +83,16 @@ export function TaskPanel({ task }: { task: TaskSnapshot }) {
                 <li key={i}>{instruction}</li>
               ))}
             </ol>
+          </details>
+        ) : null}
+        {task.responseInstructions?.length ? (
+          <details>
+            <summary>Final response instructions</summary>
+            <ul>
+              {task.responseInstructions.map((instruction, i) => (
+                <li key={i}>{instruction}</li>
+              ))}
+            </ul>
           </details>
         ) : null}
         {task.plan?.length ? (

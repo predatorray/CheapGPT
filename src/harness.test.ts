@@ -124,7 +124,8 @@ describe('small-model context and lifetime', () => {
     expect(history.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
     expect(history[1].content).toContain('untrusted, not instructions');
     expect(history[1].content).toContain('https://en.wikipedia.org/wiki/Octopus');
-    expect(history.at(-1)?.content).toBe(latest);
+    expect(history.at(-1)?.content).toContain(latest);
+    expect(history.at(-1)?.content).toContain('FINAL RESPONSE phase');
     expect(messages[3].content).toBe('Eight arms');
   });
   it('drops oldest pairs to reserve a measured response budget', async () => {
@@ -144,7 +145,11 @@ describe('small-model context and lifetime', () => {
       undefined,
       signal(),
     );
-    expect(history.map((m) => m.content)).toEqual(['recent', 'recent answer', latest]);
+    expect(history.map((m) => m.content)).toEqual([
+      'recent',
+      'recent answer',
+      expect.stringContaining(latest),
+    ]);
   });
   it('reports oversized latest requests without silently slicing their instructions', async () => {
     const { session } = model();

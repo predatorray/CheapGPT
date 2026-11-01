@@ -29,10 +29,12 @@ export interface TaskStep extends TaskCall {
 }
 export interface TaskSnapshot {
   goal: string;
+  conversational?: boolean;
   workflow?: string;
   intent?: { mode: 'independent' | 'replay' | 'use_results'; request: string };
   planningCalls?: number;
   instructions?: string[];
+  responseInstructions?: string[];
   scope?: { fileRequested: boolean; useHistory: boolean; groups: string[] };
   plan?: { tool: string; purpose: string }[];
   status: 'running' | 'complete' | 'partial' | 'clarify' | 'stopped';
@@ -47,6 +49,7 @@ export interface TaskOutcome {
   deadline: number;
 }
 export interface Schema {
+  references?: boolean;
   type?: 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean';
   properties?: Record<string, Schema>;
   required?: string[];
@@ -173,6 +176,37 @@ export function resolveArgs(value: Json, steps: TaskStep[], depth = 0, location 
       result[key] = resolveArgs(item, steps, depth + 1, `${location}.${key}`);
     }
     return result;
+  }
+  return value;
+}
+
+// Models sometimes emit a whole reference path as a scalar string. Only accept
+// an existing path whose resolved value fits the declared argument type.
+export function normalizeArgumentReferences(value: Json, schema: Schema, steps: TaskStep[]): Json {
+  if (
+    schema.references &&
+    typeof value === 'string' &&
+    /^\$?[rp]\d+(?:\.[A-Za-z_][A-Za-z_0-9]*|\.\d+)+$/.test(value)
+  ) {
+    const path = value.replace(/^\$/, '');
+    try {
+      const resolved = resolveArgs({ $ref: path }, steps);
+      validate(schema, resolved);
+      return { $ref: path };
+    } catch {
+      return value;
+    }
+  }
+  if (Array.isArray(value))
+    return value.map((item) => normalizeArgumentReferences(item, schema.items || {}, steps));
+  if (value && typeof value === 'object') {
+    if ('$ref' in value) return value;
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        normalizeArgumentReferences(item, schema.properties?.[key] || {}, steps),
+      ]),
+    );
   }
   return value;
 }

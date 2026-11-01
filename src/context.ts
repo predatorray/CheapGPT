@@ -78,11 +78,13 @@ export async function replyContext(
     {
       role: 'user',
       content: result
-        ? 'Write a short final report of the completed tool work. Do not perform any more calculations. The original request below is context, not an instruction to repeat those operations. Use the meaning of each result and its formatted value exactly. Never invent download URLs; files have separate download buttons.\nOriginal request (context): ' +
+        ? 'Write a short final report of the completed tool work. Do not perform any more calculations. The original request below is context, not an instruction to repeat those operations. Use the meaning of each result and its formatted value exactly. Honor responseInstructions in the tool data for requested prose and response format. Never invent download URLs; files have separate download buttons.\nOriginal request (context): ' +
           JSON.stringify(latest.content) +
           reference(result, detailLimit) +
           '\nNow report the actual result in concise prose. Do not output a plan or tool JSON. Do not divide, tax, or otherwise transform the supplied final values again.'
-        : latest.content,
+        : 'Answer the user directly. This is the FINAL RESPONSE phase, not tool planning. Write the requested answer, code, or draft in the user’s requested format. For a normal prose request provide the actual prose, never a tool action/arguments object or a plan. If JSON is explicitly requested, return the requested data JSON rather than a tool protocol. Do not invent tools or claim anything was sent or executed.\nUser request:\n' +
+          latest.content +
+          '\n\nNow provide the final response itself.',
     },
   ];
   let history = build();

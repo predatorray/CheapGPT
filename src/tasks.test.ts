@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseCsv, csvText, queryTable, readAttachment } from './documents';
-import { executeTaskTool, parseInstant, taskTools } from './task-tools';
+import { executeTaskTool, fileArgumentsSchema, parseInstant, taskTools } from './task-tools';
 import { normalizeCallReferences, resolveArgs, validate, objectSchema } from './task-types';
 import type { Json, LocalDocument, TaskSnapshot, TaskStep } from './task-types';
 import type { ModelSession, Message } from './types';
@@ -34,6 +34,17 @@ function fakeModel(actions: unknown[]) {
     destroy: vi.fn(),
     prompt: vi.fn(async (input) => {
       if (typeof input === 'string' && input.startsWith('Resolve this conversational request')) {
+        if ((actions[0] as { action?: string })?.action === 'social') {
+          const decision = actions.shift() as { reply: string };
+          return JSON.stringify({
+            mode: 'independent',
+            request: JSON.parse(
+              input.split('Current message: ')[1].split('\nOutput only JSON.')[0],
+            ),
+            reply: decision.reply,
+          });
+        }
+
         pendingProcedures = JSON.parse(
           input.split('Earlier tasks, oldest first: ')[1].split('\nCurrent message: ')[0],
         );
@@ -65,7 +76,20 @@ function fakeModel(actions: unknown[]) {
           append: '',
         });
       }
+      if (typeof input === 'string' && input.startsWith('Classify the ACTION'))
+        return JSON.stringify({
+          action: (
+            actions.find((a) => (a as { action?: string }).action === 'call') as { tool?: string }
+          )?.tool?.startsWith('file.')
+            ? 'write'
+            : 'read',
+        });
       if (typeof input === 'string' && input.startsWith('Does THIS user message')) {
+        if ((actions[0] as { action?: string })?.action === 'social') {
+          actions.shift();
+          return JSON.stringify({ hasRequest: false, fileRequested: false });
+        }
+
         pendingScope = {
           fileRequested:
             (actions[0] as { fileRequested?: boolean })?.fileRequested ??
@@ -79,11 +103,30 @@ function fakeModel(actions: unknown[]) {
             ),
           ],
         };
-        return JSON.stringify({ fileRequested: pendingScope.fileRequested });
+        return JSON.stringify({
+          hasRequest: true,
+          fileRequested: pendingScope.fileRequested,
+          reply: (actions[0] as { triageReply?: string })?.triageReply || '',
+        });
       }
       if (typeof input === 'string' && input.startsWith('Select only the tool groups'))
         return JSON.stringify({ useHistory: pendingScope.useHistory, groups: pendingScope.groups });
       if (typeof input === 'string' && input.startsWith('Create an ordered executable plan')) {
+        const custom = actions[0] as {
+          action?: string;
+          args?: { steps: { kind: string; purpose: string }[] };
+        };
+        if (custom?.action === 'outline') {
+          actions.shift();
+          pendingOutline = custom.args;
+          workPartsRemaining = actions.filter(
+            (a) =>
+              (a as { action?: string; tool?: string }).action === 'call' &&
+              !(a as { tool: string }).tool.startsWith('file.'),
+          ).length;
+          return JSON.stringify(pendingOutline);
+        }
+
         const clarification =
           (actions[0] as { action?: string; message?: string })?.action === 'clarify'
             ? (actions[0] as { message: string }).message
@@ -115,6 +158,7 @@ function fakeModel(actions: unknown[]) {
         workPartsRemaining = parts.length;
         pendingOutline = {
           steps: [...parts, ...(fileInstruction ? [fileInstruction] : [])].map((purpose) => ({
+            kind: 'tool',
             purpose,
           })),
           ...(clarification ? { clarification } : {}),
@@ -123,15 +167,6 @@ function fakeModel(actions: unknown[]) {
       }
       if (typeof input === 'string' && input.startsWith('Check this decomposition'))
         return JSON.stringify(pendingOutline);
-      if (typeof input === 'string' && input.startsWith('Choose one capability group')) {
-        const first = actions.find((a) => (a as { action?: string }).action === 'call') as
-          { tool?: string } | undefined;
-        return JSON.stringify({
-          group:
-            taskTools.find((t) => t.id === first?.tool)?.group ||
-            (pendingScope.fileRequested ? 'export' : 'calculator'),
-        });
-      }
       if (typeof input === 'string' && input.startsWith('Bind tools for this instruction')) {
         const calls = actions.filter((a) => (a as { action?: string }).action === 'call') as {
           tool: string;
@@ -149,6 +184,20 @@ function fakeModel(actions: unknown[]) {
             purpose: action.purpose || action.args?.label || 'Execute this requested operation',
           })),
         });
+      }
+      if (typeof input === 'string' && input.startsWith('Choose file format'))
+        return JSON.stringify({
+          format: (
+            actions.find((a) => (a as { tool?: string }).tool === 'file.create') as {
+              args: { format: string };
+            }
+          ).args.format,
+        });
+      if (typeof input === 'string' && input.startsWith('Extract these fields')) {
+        const response = actions.shift() as { action: string; args: unknown };
+        if (response.action !== 'extraction')
+          throw new Error('Missing fixture extraction response');
+        return JSON.stringify(response.args);
       }
       if (typeof input === 'string' && input.startsWith('Check arguments'))
         return JSON.stringify(pendingArgs);
@@ -286,7 +335,7 @@ describe('structured chaining', () => {
       { action: 'call', tool: 'shell', args: {} },
     ]);
     expect(stopped.snapshot.status).toBe('partial');
-    expect(stopped.session.prompt).toHaveBeenCalledTimes(6);
+    expect(stopped.session.prompt).toHaveBeenCalledTimes(5);
   });
   it('completes a flattened-reference chain without consuming the repair budget', async () => {
     const outcome = await task('Multiply twelve by seven then divide the result by three', [
@@ -820,7 +869,8 @@ describe('model-directed work only', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
   it('rejects model extraction unsupported by the retrieved text', async () => {
-    const { base } = fakeModel([{ owner: 'Invented person' }]);
+    const { base, session } = fakeModel([]);
+    session.prompt = vi.fn().mockResolvedValue(JSON.stringify({ owner: 'Invented person' }));
     await expect(
       executeTaskTool(
         'documents.extract',
@@ -1339,5 +1389,625 @@ describe('calculator input scope', () => {
     expect(prompts[1]).toContain('"reference":"$r1.value","value":10');
     expect(prompts[1]).not.toContain('$r2');
     expect(result.snapshot.steps[1].result?.data).toMatchObject({ value: 20 });
+  });
+});
+
+describe('everyday cross-tool references', () => {
+  it.each(['r1.instant', '$r1.instant'])(
+    'normalizes a model-selected date input %s before executing the next tool',
+    async (instant) => {
+      const result = await task(
+        'Add 2 hours to 2026-11-01T00:30:00-07:00, display the result in Asia/Tokyo, and export as JSON.',
+        [
+          {
+            action: 'call',
+            tool: 'date.calculate',
+            args: { start: '2026-11-01T00:30:00-07:00', amount: 2, unit: 'hours' },
+          },
+          { action: 'call', tool: 'date.convert', args: { instant, timeZone: 'Asia/Tokyo' } },
+          {
+            action: 'call',
+            tool: 'file.export_results',
+            args: { name: 'arrival', format: 'json', resultIds: ['r2'] },
+          },
+        ],
+      );
+      expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+      expect(result.snapshot.steps[1].args.instant).toBe('2026-11-01T09:30:00.000Z');
+      expect(result.snapshot.steps[2].result?.artifact?.content).toContain('6:30:00 PM');
+      const binding = vi
+        .mocked(result.session.prompt)
+        .mock.calls.map(([input]) => String(input))
+        .filter((input) => input.startsWith('Bind tools'));
+      expect(binding[1]).toContain('"instant":"2026-11-01T09:30:00.000Z"');
+      expect(binding[2]).toContain('Perform ONLY this instruction: and export as JSON.');
+      expect(binding[2]).toContain('file.export_results');
+    },
+  );
+  it('keeps local-data provenance when the model uses a shorthand reference in a public lookup', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const prior: TaskSnapshot = {
+      goal: 'Read notes',
+      status: 'complete',
+      steps: [
+        {
+          id: 'r1',
+          tool: 'documents.read',
+          args: {},
+          status: 'done',
+          summary: 'Private notes',
+          result: {
+            tool: 'documents',
+            summary: 'Private notes',
+            sources: [],
+            data: { text: 'PRIVATE_AGENDA' },
+          },
+        },
+      ],
+    };
+    const result = await task(
+      'Search GitHub using the previous note',
+      [
+        { action: 'call', tool: 'github.search', args: { query: 'p1.text' } },
+        { action: 'retry', tool: 'github.search', args: { query: 'p1.text' } },
+      ],
+      { messages: [{ id: 'old', role: 'assistant', content: 'Notes read', task: prior }] },
+    );
+    expect(result.snapshot.status).toBe('partial');
+    expect(result.snapshot.note).toContain('Local document or utility results cannot be sent');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('lookup followed by writing', () => {
+  it('keeps a requested summary as a response instruction without another lookup', async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      reply({
+        query: {
+          pages: {
+            1: {
+              title: 'Axolotl',
+              extract: 'The axolotl is a salamander that retains larval features as an adult.',
+              fullurl: 'https://en.wikipedia.org/wiki/Axolotl',
+            },
+          },
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const result = await task('Search Wikipedia for axolotls and summarize in two sentences.', [
+      {
+        action: 'outline',
+        args: {
+          steps: [
+            { kind: 'tool', purpose: 'Search Wikipedia for axolotls' },
+            { kind: 'response', purpose: 'and summarize in two sentences.' },
+          ],
+        },
+      },
+      { action: 'call', tool: 'wikipedia.search', args: { query: 'axolotls' } },
+    ]);
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.steps.map((step) => step.tool)).toEqual(['wikipedia.search']);
+    expect(result.snapshot.responseInstructions).toEqual(['and summarize in two sentences.']);
+    expect(result.context?.data).toMatchObject({
+      responseInstructions: ['and summarize in two sentences.'],
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('keeps calendar metadata with its file operation and presents the typed event schema', async () => {
+    const request =
+      'Create a calendar file for Project review from 2026-11-02T09:00:00-08:00 to 2026-11-02T09:45:00-08:00. Description: Discuss roadmap; bring notes.';
+    const result = await task(request, [
+      { action: 'outline', args: { steps: [{ kind: 'tool', purpose: request }] } },
+      {
+        action: 'call',
+        tool: 'file.create',
+        args: {
+          name: 'review',
+          format: 'ics',
+          data: {
+            title: 'Project review',
+            start: '2026-11-02T09:00:00-08:00',
+            end: '2026-11-02T09:45:00-08:00',
+            description: 'Discuss roadmap; bring notes.',
+          },
+        },
+      },
+    ]);
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.steps).toHaveLength(1);
+    expect(result.snapshot.steps[0].result?.artifact?.content).toContain('DTEND:20261102T174500Z');
+    const call = vi
+      .mocked(result.session.prompt)
+      .mock.calls.find(([input]) => String(input).startsWith('Generate arguments'));
+    expect(JSON.stringify(call?.[1]?.responseConstraint)).toContain(
+      '"required":["title","start","end"]',
+    );
+  });
+  it('writes custom JSON through serialized text instead of an undefined object schema', async () => {
+    const result = await task('Create a JSON file with name Ada and theme forest', [
+      {
+        action: 'call',
+        tool: 'file.create',
+        args: { name: 'profile', format: 'json', text: '{"name":"Ada","theme":"forest"}' },
+      },
+    ]);
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(JSON.parse(result.snapshot.steps[0].result!.artifact!.content)).toEqual({
+      name: 'Ada',
+      theme: 'forest',
+    });
+  });
+});
+
+describe('typed file and table sources', () => {
+  it('requires the calendar event payload before an empty event can reach execution', () => {
+    expect(() =>
+      validate(fileArgumentsSchema('ics'), { name: 'event', format: 'ics', data: {} }),
+    ).toThrow('title');
+    expect(() =>
+      validate(fileArgumentsSchema('json'), { name: 'profile', format: 'json', data: {} }),
+    ).toThrow('text');
+  });
+  it('repairs invalid serialized JSON before recording a failed tool call', async () => {
+    const result = await task('Create a JSON file containing name Ada', [
+      {
+        action: 'call',
+        tool: 'file.create',
+        args: { name: 'profile', format: 'json', text: '{name:"Ada"}' },
+      },
+      {
+        action: 'retry',
+        tool: 'file.create',
+        args: { name: 'profile', format: 'json', text: '{"name":"Ada"}' },
+      },
+    ]);
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.steps).toHaveLength(1);
+    expect(result.snapshot.steps[0].result?.artifact?.content).toContain('"name": "Ada"');
+  });
+  it('uses the selected attachment and then its filtered result as separate table sources', async () => {
+    const first = await executeTaskTool(
+      'table.query',
+      { source: csv.id, filter: { column: 'Amount', op: 'gt', value: 5 } },
+      { documents: [csv], signal: signal() },
+    );
+    const steps: TaskStep[] = [
+      {
+        id: 'r1',
+        tool: 'table.query',
+        args: {},
+        status: 'done',
+        summary: first.summary,
+        result: first,
+      },
+    ];
+    const second = await executeTaskTool(
+      'table.query',
+      { source: 'r1.table', sort: { column: 'Amount', direction: 'asc' } },
+      { documents: [csv], results: steps, signal: signal() },
+    );
+    expect(second.data).toMatchObject({
+      table: {
+        columns: ['Team', 'Amount'],
+        rows: [
+          ['A', '8'],
+          ['A', '12'],
+        ],
+      },
+      rowCount: 2,
+    });
+    await expect(
+      executeTaskTool(
+        'table.query',
+        { source: csv.id, table: { columns: ['Bad'], rows: [] } },
+        { documents: [csv], signal: signal() },
+      ),
+    ).rejects.toThrow('without a second table input');
+  });
+});
+
+describe('CSV data fidelity', () => {
+  it('does not discard table cells or nested fields when exporting multiple results', async () => {
+    const table = {
+      columns: ['Item', 'Stock'],
+      rows: [
+        ['Tape', 1],
+        ['Pencils', 3],
+      ],
+    };
+    const steps: TaskStep[] = [
+      {
+        id: 'r1',
+        tool: 'table.query',
+        args: {},
+        status: 'done',
+        summary: 'Filtered inventory',
+        result: {
+          tool: 'table',
+          summary: 'Filtered inventory',
+          sources: [],
+          data: { table, rowCount: 2 },
+        },
+      },
+      {
+        id: 'r2',
+        tool: 'documents.extract',
+        args: {},
+        status: 'done',
+        summary: 'Owner',
+        result: {
+          tool: 'documents',
+          summary: 'Owner',
+          sources: [],
+          data: { fields: { Owner: 'Maya', Budget: null } },
+        },
+      },
+    ];
+    const file = await executeTaskTool(
+      'file.export_results',
+      { name: 'report', format: 'csv', resultIds: ['r1', 'r2'] },
+      { documents: [], results: steps, signal: signal() },
+    );
+    const content = file.artifact!.content;
+    expect(content).toContain('"table.rows[0][0]","Tape"');
+    expect(content).toContain('"table.rows[1][1]","3"');
+    expect(content).toContain('"fields.Owner","Maya"');
+    expect(content).toContain('"fields.Budget"');
+  });
+});
+
+describe('reference roles in tool schemas', () => {
+  it('offers references for document content while field names stay literal', async () => {
+    const result = await task(
+      'Read notes.md, extract Owner and Deadline and Email, and export as JSON.',
+      [
+        { action: 'call', tool: 'documents.read', args: { documentId: document.id } },
+        {
+          action: 'call',
+          tool: 'documents.extract',
+          args: { text: { $ref: 'r1.text' }, fields: ['Owner', 'Deadline', 'Email'] },
+        },
+        { action: 'extraction', args: { Owner: 'Alice', Deadline: 'Friday', Email: null } },
+        {
+          action: 'call',
+          tool: 'file.export_results',
+          args: { name: 'notes', format: 'json', resultIds: ['r2'] },
+        },
+      ],
+      { documents: [document] },
+    );
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    const call = vi
+      .mocked(result.session.prompt)
+      .mock.calls.find(([input]) =>
+        String(input).startsWith('Generate arguments for ONE tool call: documents.extract'),
+      );
+    const schema = call?.[1]?.responseConstraint as {
+      properties: {
+        text: { anyOf: unknown[] };
+        fields: { items: { type: string; anyOf?: unknown } };
+      };
+    };
+    expect(schema.properties.text.anyOf).toBeDefined();
+    expect(schema.properties.fields.items.type).toBe('string');
+    expect(schema.properties.fields.items.anyOf).toBeUndefined();
+    expect(JSON.stringify(schema)).not.toContain('references');
+    expect(result.snapshot.steps[2].result?.artifact?.content).toContain('"Email": null');
+  });
+});
+
+describe('grounded extraction repair', () => {
+  it('asks the local model to correct unsupported fields and preserves verified values', async () => {
+    const { base, session } = fakeModel([]);
+    session.prompt = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify({ Owner: 'Maya', Budget: 'Not specified' }))
+      .mockResolvedValueOnce(JSON.stringify({ Owner: 'Maya', Budget: null }));
+    const result = await executeTaskTool(
+      'documents.extract',
+      { text: 'Owner: Maya\nDeadline: Friday', fields: ['Owner', 'Budget'] },
+      { documents: [], model: base, signal: signal() },
+    );
+    expect(result.data).toMatchObject({ fields: { Owner: 'Maya', Budget: null } });
+    expect(session.prompt).toHaveBeenCalledTimes(2);
+    const constraint = vi.mocked(session.prompt).mock.calls[1][1]?.responseConstraint as {
+      properties: { Owner: { enum: string[] } };
+    };
+    expect(constraint.properties.Owner.enum).toEqual(['Maya']);
+  });
+});
+
+describe('current-result exports', () => {
+  it('exports the latest data table instead of the original input or a file receipt', async () => {
+    const make = (id: string, rows: Json[][]): TaskStep => ({
+      id,
+      tool: 'table.query',
+      args: {},
+      status: 'done',
+      summary: 'Table',
+      result: {
+        tool: 'table',
+        summary: 'Table',
+        sources: [],
+        data: { table: { columns: ['Item', 'Stock'], rows }, rowCount: rows.length },
+      },
+    });
+    const original = make('r1', [
+      ['Pencils', 3],
+      ['Paper', 20],
+      ['Tape', 1],
+    ]);
+    const sorted = make('r3', [
+      ['Tape', 1],
+      ['Pencils', 3],
+    ]);
+    const receipt = await executeTaskTool(
+      'file.export_results',
+      { name: 'old', format: 'csv', resultIds: ['r1'] },
+      { documents: [], results: [original], signal: signal() },
+    );
+    const result = await executeTaskTool(
+      'file.export_current',
+      { name: 'sorted', format: 'csv' },
+      {
+        documents: [],
+        results: [
+          original,
+          sorted,
+          {
+            id: 'r4',
+            tool: 'file.export_results',
+            args: {},
+            status: 'done',
+            summary: 'Download prepared',
+            result: receipt,
+          },
+        ],
+        signal: signal(),
+      },
+    );
+    expect(result.artifact?.content).toBe('"Item","Stock"\r\n"Tape","1"\r\n"Pencils","3"');
+    expect(result.data).toMatchObject({ resultIds: ['r3'] });
+  });
+  it('retains reusable data after several successive download receipts', async () => {
+    const data = await executeTaskTool(
+      'table.query',
+      { source: csv.id, sort: { column: 'Amount', direction: 'asc' } },
+      { documents: [csv], signal: signal() },
+    );
+    const receipt = await executeTaskTool(
+      'file.create',
+      { name: 'previous', format: 'markdown', text: 'Download receipt' },
+      { documents: [], signal: signal() },
+    );
+    const messages: Message[] = [
+      {
+        id: 'data',
+        role: 'assistant',
+        content: 'Table ready',
+        task: {
+          goal: 'Sort expenses',
+          status: 'complete',
+          steps: [
+            {
+              id: 'r1',
+              tool: 'table.query',
+              args: {},
+              status: 'done',
+              summary: data.summary,
+              result: data,
+            },
+          ],
+        },
+      },
+    ];
+    for (let i = 0; i < 5; i++)
+      messages.push({
+        id: 'file' + i,
+        role: 'assistant',
+        content: 'Download ready',
+        task: {
+          goal: 'Export the table',
+          status: 'complete',
+          steps: [
+            {
+              id: 'r1',
+              tool: 'file.create',
+              args: {},
+              status: 'done',
+              summary: receipt.summary,
+              result: receipt,
+            },
+          ],
+        },
+      });
+    const result = await task(
+      'Export the final table as CSV.',
+      [
+        { action: 'intent', mode: 'use_results', request: 'Export the final table as CSV.' },
+        { action: 'call', tool: 'file.export_current', args: { name: 'latest', format: 'csv' } },
+      ],
+      { messages },
+    );
+    expect(result.snapshot.status, result.snapshot.note).toBe('complete');
+    expect(result.snapshot.steps[0].result?.artifact?.content).toContain('"B","4"');
+    expect(result.snapshot.steps[0].result?.data).toMatchObject({ resultIds: ['p1'] });
+  });
+});
+
+describe('lightweight conversational replies', () => {
+  it.each(['Hello', 'Thanks!', 'Good morning'])(
+    'uses one local-model decision for a purely social message: %s',
+    async (goal) => {
+      const outcome = await task(goal, [{ action: 'social', reply: 'Hi! What can I help with?' }]);
+      expect(outcome.answer).toBeUndefined();
+      expect(outcome.snapshot.conversational).toBe(true);
+      expect(outcome.snapshot.status).toBe('complete');
+      expect(outcome.snapshot.planningCalls).toBe(1);
+      expect(outcome.snapshot.steps).toEqual([]);
+      expect(outcome.context).toBeUndefined();
+      expect(outcome.useHistory).toBe(false);
+      expect(outcome.session.prompt).toHaveBeenCalledTimes(1);
+      expect(outcome.session.promptStreaming).not.toHaveBeenCalled();
+    },
+  );
+  it('does not re-plan prior tool work just to answer a greeting', async () => {
+    const previous: TaskSnapshot = {
+      goal: 'Add two hours to a date',
+      status: 'complete',
+      steps: [],
+    };
+    const outcome = await task('Hello', [{ action: 'social', reply: 'Hello!' }], {
+      messages: [{ id: 'old', role: 'assistant', content: 'Date calculated', task: previous }],
+    });
+    expect(outcome.answer).toBeUndefined();
+    expect(outcome.snapshot.conversational).toBe(true);
+    expect(outcome.snapshot.planningCalls).toBe(1);
+    expect(String(vi.mocked(outcome.session.prompt).mock.calls[0][0])).toContain(
+      'Does THIS user message',
+    );
+    expect(outcome.context).toBeUndefined();
+  });
+  it('does not mistake a greeting followed by an action request for a social-only message', async () => {
+    const outcome = await task('Hello, calculate 2 + 3', [
+      { action: 'call', tool: 'calculator.evaluate', args: { expression: '2+3', label: 'Sum' } },
+    ]);
+    expect(outcome.answer).toBeUndefined();
+    expect(outcome.snapshot.steps[0].result?.data).toMatchObject({ value: 5 });
+    expect(outcome.snapshot.planningCalls).toBeGreaterThan(1);
+  });
+  it('keeps a pending clarification on the task path', async () => {
+    const previous: TaskSnapshot = {
+      goal: 'Convert 10 USD',
+      status: 'clarify',
+      steps: [],
+      note: 'Which currency?',
+    };
+    const outcome = await task(
+      'Hello',
+      [{ action: 'clarify', message: 'Which target currency?', triageReply: 'Hello there!' }],
+      { messages: [{ id: 'a', role: 'assistant', content: 'Which currency?', task: previous }] },
+    );
+    expect(outcome.snapshot.status).toBe('clarify');
+    expect(outcome.answer).toBe('Which target currency?');
+    expect(outcome.snapshot.goal).toContain('Convert 10 USD');
+  });
+  it('still requires LanguageModel for greetings', async () => {
+    await expect(
+      runTask({
+        goal: 'Hello',
+        model: null,
+        documents: [],
+        messages: [],
+        signal: signal(),
+        onUpdate: () => {},
+      }),
+    ).rejects.toThrow('requires the local LanguageModel');
+  });
+});
+
+describe('tool availability during lightweight task routing', () => {
+  it('does not offer calculators for a clock request without numeric inputs', async () => {
+    const outcome = await task('Hello, what time is it in UTC?', [
+      { action: 'call', tool: 'datetime.now', args: { query: 'UTC' } },
+    ]);
+    expect(outcome.snapshot.status, outcome.snapshot.note).toBe('complete');
+    const prompt = vi
+      .mocked(outcome.session.prompt)
+      .mock.calls.map(([input]) => String(input))
+      .find((input) => input.startsWith('Bind tools'))!;
+    const offered = JSON.parse(prompt.split('\nTools: ')[1].split('\nCompleted inputs: ')[0]) as {
+      tool: string;
+    }[];
+    expect(offered.map((item) => item.tool)).toEqual(['datetime.now']);
+    const argumentsPrompt = vi
+      .mocked(outcome.session.prompt)
+      .mock.calls.map(([input]) => String(input))
+      .find((input) => input.startsWith('Generate arguments for ONE clock'))!;
+    expect(argumentsPrompt).toContain('machine parameter, never a question or sentence');
+    expect(argumentsPrompt).not.toContain('calculator.adjust');
+  });
+  it('offers arithmetic utilities after a numeric tool result even when routing only selected currency', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(reply({ base: 'USD', date: '2026-10-30', rates: { CAD: 1.375 } })),
+    );
+    const { base, session } = fakeModel([
+      { action: 'call', tool: 'currency.convert', args: { amount: 10, from: 'USD', to: 'CAD' } },
+      {
+        action: 'call',
+        tool: 'calculator.adjust',
+        args: { operation: 'divide', operand: 2, label: 'Share' },
+      },
+    ]);
+    const original = vi.mocked(session.prompt).getMockImplementation()!;
+    vi.mocked(session.prompt).mockImplementation((input, options) =>
+      typeof input === 'string' && input.startsWith('Select only the tool groups')
+        ? Promise.resolve(JSON.stringify({ useHistory: false, groups: ['currency'] }))
+        : original(input, options),
+    );
+    const outcome = await runTask({
+      goal: 'Convert 10 USD to CAD, divide by 2',
+      model: base,
+      documents: [],
+      messages: [],
+      signal: signal(),
+      onUpdate: () => {},
+    });
+    expect(outcome.snapshot.status, outcome.snapshot.note).toBe('complete');
+    expect(outcome.snapshot.steps[1].result?.data).toMatchObject({ value: 6.875 });
+  });
+});
+
+describe('explicit conversational routing mode', () => {
+  it('does not shortcut a task when a model also supplies an inappropriate reply', async () => {
+    const outcome = await task('Hello, what time is it in UTC?', [
+      {
+        action: 'call',
+        tool: 'datetime.now',
+        args: { query: 'UTC' },
+        triageReply: 'I cannot access a clock.',
+      },
+    ]);
+    expect(outcome.answer).toBeUndefined();
+    expect(outcome.snapshot.status, outcome.snapshot.note).toBe('complete');
+    expect(outcome.snapshot.steps[0].tool).toBe('datetime.now');
+  });
+});
+
+describe('conversational history isolation', () => {
+  it('does not let lightweight greetings displace a reusable task procedure', async () => {
+    const prior: TaskSnapshot = { goal: 'Calculate 10 * 2', status: 'complete', steps: [] };
+    const messages: Message[] = [{ id: 'task', role: 'assistant', content: '20', task: prior }];
+    for (let i = 0; i < 4; i++)
+      messages.push({
+        id: 'hello' + i,
+        role: 'assistant',
+        content: 'Hello!',
+        task: { goal: 'Hello', status: 'complete', steps: [], conversational: true },
+      });
+    const outcome = await task(
+      'Repeat for 30.',
+      [
+        { action: 'intent', mode: 'replay', request: 'Calculate 30 * 2' },
+        {
+          action: 'call',
+          tool: 'calculator.evaluate',
+          args: { expression: '30*2', label: 'Product' },
+        },
+      ],
+      { messages },
+    );
+    expect(outcome.snapshot.status, outcome.snapshot.note).toBe('complete');
+    const intentPrompt = vi
+      .mocked(outcome.session.prompt)
+      .mock.calls.map(([input]) => String(input))
+      .find((input) => input.startsWith('Resolve this conversational request'))!;
+    expect(intentPrompt).toContain('Calculate 10 * 2');
+    expect(intentPrompt).not.toContain('"request":"Hello"');
+    expect(outcome.snapshot.steps[0].result?.data).toMatchObject({ value: 60 });
   });
 });

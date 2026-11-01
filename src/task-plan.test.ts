@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyReplayEdits, sourceInstructions } from './task-plan';
+import { applyReplayEdits, sourceInstructions, sourceQuotes } from './task-plan';
 
 describe('lossless source alignment', () => {
   it('accepts explanatory insertions while executing only original source text', () => {
@@ -63,5 +63,38 @@ describe('model-selected replay patches', () => {
     [{ before: 'missing', after: '3' }],
   ])('rejects ambiguous, overlapping and missing edit anchors: %j', (...edits) => {
     expect(() => applyReplayEdits('Calculate 2 * 2', edits, '')).toThrow(/replay/i);
+  });
+});
+
+describe('source-only plan repair choices', () => {
+  it('offers whole actions and literal spans without foreign example text', () => {
+    const goal = 'Hello, what time is it in UTC?';
+    const quotes = sourceQuotes(goal)!;
+    expect(quotes[0]).toBe(goal);
+    expect(quotes).toContain('what time is it in UTC?');
+    expect(quotes).not.toContain('Read the source');
+    expect(quotes.every((quote) => goal.includes(quote))).toBe(true);
+  });
+  it('bounds the size of generated constraints', () => {
+    expect(sourceQuotes('many different words in a longer request', 10)).toBeUndefined();
+    expect(sourceQuotes('x'.repeat(501))).toBeUndefined();
+  });
+  it('deduplicates repeated spans', () => {
+    const quotes = sourceQuotes('hi hi')!;
+    expect(quotes.filter((quote) => quote === 'hi')).toHaveLength(1);
+  });
+});
+
+describe('introductory context in action labels', () => {
+  it('keeps an omitted conversational prefix attached to the original tool instruction', () => {
+    const goal = 'Hello, what time is it in UTC?';
+    expect(sourceInstructions(goal, ['what time is it in UTC?'])).toEqual([goal]);
+  });
+  it('preserves polite introductory wording without requiring it in the model label', () => {
+    const goal = 'Please, could you read notes.md and extract the owner?';
+    expect(sourceInstructions(goal, ['read notes.md', 'extract the owner?'])).toEqual([
+      'Please, could you read notes.md',
+      'and extract the owner?',
+    ]);
   });
 });

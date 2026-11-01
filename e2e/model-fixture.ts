@@ -13,6 +13,7 @@ export async function model(
       Object.assign(window, { taskTestCalls: calls });
       let pendingIntent: string | undefined;
       let pendingProcedures: { resolvedRequest: string }[] = [];
+      const extractions: unknown[] = [];
       let pendingArgs: unknown;
       let pendingOutline: unknown;
       let workPartsRemaining = 0;
@@ -24,6 +25,17 @@ export async function model(
         prompt: async (input: string) => {
           calls.plans.push(input);
           if (input.startsWith('Resolve this conversational request')) {
+            if ((actions[0] as { action?: string })?.action === 'social') {
+              const decision = actions.shift() as { reply: string };
+              return JSON.stringify({
+                mode: 'independent',
+                request: JSON.parse(
+                  input.split('Current message: ')[1].split('\nOutput only JSON.')[0],
+                ),
+                reply: decision.reply,
+              });
+            }
+
             pendingProcedures = JSON.parse(
               input.split('Earlier tasks, oldest first: ')[1].split('\nCurrent message: ')[0],
             );
@@ -59,7 +71,16 @@ export async function model(
               append: '',
             });
           }
+          if (input.startsWith('Classify the ACTION'))
+            return JSON.stringify({
+              action: pendingCalls[0]?.tool.startsWith('file.') ? 'write' : 'read',
+            });
           if (input.startsWith('Does THIS user message')) {
+            if ((actions[0] as { action?: string })?.action === 'social') {
+              actions.shift();
+              return JSON.stringify({ hasRequest: false, fileRequested: false });
+            }
+
             pendingScope = {
               fileRequested: actions
                 .slice(
@@ -86,7 +107,11 @@ export async function model(
                 ),
               ],
             };
-            return JSON.stringify({ fileRequested: pendingScope.fileRequested });
+            return JSON.stringify({
+              hasRequest: true,
+              fileRequested: pendingScope.fileRequested,
+              reply: '',
+            });
           }
           if (input.startsWith('Select only the tool groups'))
             return JSON.stringify({
@@ -96,6 +121,7 @@ export async function model(
           if (input.startsWith('Create an ordered executable plan')) {
             pendingCalls = [];
             let clarification: string | undefined;
+            let customOutline: { steps: { kind: string; purpose: string }[] } | undefined;
             while (actions.length) {
               const action = actions.shift() as {
                 action: string;
@@ -103,6 +129,14 @@ export async function model(
                 args: unknown;
                 message?: string;
               };
+              if (action.action === 'outline') {
+                customOutline = action.args as typeof customOutline;
+                continue;
+              }
+              if (action.action === 'extraction') {
+                extractions.push(action.args);
+                continue;
+              }
               if (action.action === 'clarify') {
                 clarification = action.message;
                 break;
@@ -132,24 +166,21 @@ export async function model(
             workPartsRemaining = parts.length;
             pendingOutline = {
               steps: [...parts, ...(fileInstruction ? [fileInstruction] : [])].map((purpose) => ({
+                kind: 'tool',
                 purpose,
               })),
               ...(clarification ? { clarification } : {}),
             };
+            if (customOutline) {
+              pendingOutline = customOutline;
+              workPartsRemaining = Math.min(
+                workCount,
+                customOutline.steps.filter((step) => step.kind === 'tool').length,
+              );
+            }
             return JSON.stringify(pendingOutline);
           }
           if (input.startsWith('Check this decomposition')) return JSON.stringify(pendingOutline);
-          if (input.startsWith('Choose one capability group')) {
-            const tool = pendingCalls[0]?.tool;
-            const prefix = tool?.split('.')[0] || 'calculator';
-            return JSON.stringify({
-              group:
-                tool === 'github.read_file'
-                  ? 'github_file'
-                  : ({ file: 'export', date: 'date_math' } as Record<string, string>)[prefix] ||
-                    prefix,
-            });
-          }
           if (input.startsWith('Bind tools for this instruction')) {
             const work = pendingCalls.filter((a) => !a.tool.startsWith('file.'));
             const selected =
@@ -164,8 +195,24 @@ export async function model(
               })),
             });
           }
+          if (input.startsWith('Extract these fields')) return JSON.stringify(extractions.shift());
+          if (input.startsWith('Choose file format'))
+            return JSON.stringify({ format: (pendingCalls[0]?.args as { format: string }).format });
           if (input.startsWith('Check arguments')) return JSON.stringify(pendingArgs);
           pendingArgs = pendingCalls.shift()?.args ?? {};
+          const args = pendingArgs as { documentId?: string; source?: string };
+          const key = args.source?.startsWith('@attachment:') ? 'source' : 'documentId';
+          if (args[key]?.startsWith('@attachment:')) {
+            const attachments = JSON.parse(input.match(/Attachments: (\[[^\n]*\])/)![1]) as {
+              id: string;
+              name: string;
+            }[];
+            const attachment = attachments.find(
+              (file) => file.name === args[key]!.slice('@attachment:'.length),
+            );
+            if (!attachment) throw new Error('Fixture attachment was not offered to the model.');
+            args[key] = attachment.id;
+          }
           return JSON.stringify(pendingArgs);
         },
         promptStreaming: async function* (input: unknown) {
