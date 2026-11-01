@@ -1008,7 +1008,16 @@ export default function App() {
               <span>Double-check the important stuff.</span>
             </p>
             <footer className="copyright-footer">
-              <span>© {new Date().getFullYear()} Wenhao Ji</span>
+              <span>
+                © {new Date().getFullYear()}{' '}
+                <a
+                  href="https://www.predatorray.me/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Wenhao Ji
+                </a>
+              </span>
               <span aria-hidden="true">·</span>
               <a
                 href="https://github.com/predatorray/CheapGPT"
