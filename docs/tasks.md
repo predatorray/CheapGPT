@@ -10,12 +10,15 @@ Try requests such as:
 
 - `Convert 250 USD to CAD, add 12% tax, split between 3 people and export as CSV.`
 - `What is my timezone?`
+- `Search the web for independent search engines and export the results as JSON`
 - `Compare GitHub repositories vitejs/vite and facebook/react`
 - Attach a CSV, then `Sum Amount by Team and export the totals as CSV`
 - `Add 7 days to 2026-10-30`
 - `Create calendar event "Team planning" from 2026-10-30T09:00:00-07:00 to 2026-10-30T10:00:00-07:00`
 
 These are examples, not guaranteed workflows. Nano can make planning and arithmetic-translation mistakes. Expand Task progress to inspect actual executed steps and the number of local planning calls. Calculations run in code; the model supplies the formula. Public lookups require network access.
+
+`web.search` queries Purili's public index and returns `query` and `results` with `title`, `url`, and `description`. Select **Web search** for a keyword lookup, or use Auto tools to combine search with other tools. A later `website.read` call can use a result URL such as `r1.results.0.url`; browser CORS restrictions still apply when reading the page. Results can also be exported directly. Search uses the existing public-network guards, request cancellation, 15-second timeout, and five-minute cache. Search snippets are untrusted source material, not instructions or proof of the full page's contents.
 
 ## Attachments and downloads
 

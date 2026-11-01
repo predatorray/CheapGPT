@@ -32,6 +32,7 @@ const labels: Record<string, string> = {
   'weather.forecast': 'Check forecast',
   'places.search': 'Find place',
   'wikipedia.search': 'Search Wikipedia',
+  'web.search': 'Search the web',
   'ip.lookup': 'Look up IP',
   'website.read': 'Read website',
   'datetime.now': 'Check clock',

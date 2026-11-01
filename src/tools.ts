@@ -94,6 +94,16 @@ export const toolInfo: {
       'Direct browser requests; sites must allow CORS. Regional restrictions and sign-in may block access. HTML/text only, 1 MB limit, 15-second timeout. No proxy.',
   },
   {
+    id: 'web',
+    name: 'Web search',
+    description: 'Search the public internet by keyword',
+    placeholder: 'Search the web for independent search engines',
+    provider: 'Purili',
+    url: 'https://puri.li/developer',
+    quota:
+      'Public web index; no API key or fixed quota. Returns up to 10 ranked page links and snippets, not full page content. Queries are limited to 300 characters; 15-second timeout and five-minute cache.',
+  },
+  {
     id: 'wikipedia',
     name: 'Wikipedia',
     description: 'Borrow a little knowledge',
@@ -212,6 +222,40 @@ export async function runTool(
   const query = input.trim().slice(0, 300);
   if (!query) throw new Error('Give this tool something to look up first.');
   signal.throwIfAborted();
+  if (tool === 'web') {
+    const data = await json<{ results?: unknown }>(
+      url('https://puri.li/api/search', { q: query }),
+      signal,
+    );
+    if (!data || !Array.isArray(data.results))
+      throw new Error('The search service returned an invalid response. Please try again later.');
+    const results = data.results.slice(0, 10).flatMap((item: unknown) => {
+      if (!item || typeof item !== 'object') return [];
+      const result = item as Record<string, unknown>;
+      const link = typeof result.url === 'string' ? safeUrl(result.url) : undefined;
+      if (!link || typeof result.title !== 'string') return [];
+      return [
+        {
+          title: result.title.slice(0, 300),
+          url: link,
+          description:
+            typeof result.description === 'string' ? result.description.slice(0, 1600) : '',
+        },
+      ];
+    });
+    return {
+      tool,
+      data: { query, results },
+      summary: results.length
+        ? `Found ${results.length} web results via Purili. These are indexed snippets; read a page for more detail.`
+        : 'No web results found. Try broader or different keywords.',
+      sources: results.map((result) => ({
+        title: result.title,
+        url: result.url,
+        detail: result.description || 'No snippet available.',
+      })),
+    };
+  }
   if (tool === 'wikipedia') {
     const data = await json<{
       query?: {

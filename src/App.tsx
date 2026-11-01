@@ -72,6 +72,7 @@ const toolIcons = {
   calculator: <CalculateOutlined />,
   datetime: <ScheduleOutlined />,
   website: <LanguageRounded />,
+  web: <SearchRounded />,
   wikipedia: <LanguageRounded />,
   github: <GitHub />,
   places: <TravelExploreRounded />,

@@ -83,21 +83,24 @@ export const taskTools: TaskTool[] = [
     network: true,
     schema: obj({ base: { ...currency, references: true } }),
   },
-  ...(['wikipedia', 'github', 'places', 'weather', 'ip', 'website'] as const).map((group) => ({
-    id: `${group}.${({ wikipedia: 'search', github: 'search', places: 'search', weather: 'forecast', ip: 'lookup', website: 'read' } as const)[group]}`,
-    group,
-    description: {
-      wikipedia: 'Encyclopedia search.',
-      github:
-        'Search public repositories. Returns repositories with name, url, description, stars, language.',
-      places: 'Find a named place, not private device location.',
-      weather: 'City forecast. Query is city name only.',
-      ip: 'Explicit IP address, or current only on an explicit own-IP request.',
-      website: 'Read a user-supplied URL or a URL from earlier public results. CORS applies.',
-    }[group],
-    network: true,
-    schema: obj({ query: { ...(group === 'website' ? str : short), references: true } }),
-  })),
+  ...(['web', 'wikipedia', 'github', 'places', 'weather', 'ip', 'website'] as const).map(
+    (group) => ({
+      id: `${group}.${({ web: 'search', wikipedia: 'search', github: 'search', places: 'search', weather: 'forecast', ip: 'lookup', website: 'read' } as const)[group]}`,
+      group,
+      description: {
+        web: 'Search the public internet by keyword using Purili. Returns query and up to 10 ranked results with title, url, description. Snippets are not full page content; use website.read on a result URL when needed.',
+        wikipedia: 'Encyclopedia search.',
+        github:
+          'Search public repositories. Returns repositories with name, url, description, stars, language.',
+        places: 'Find a named place, not private device location.',
+        weather: 'City forecast. Query is city name only.',
+        ip: 'Explicit IP address, or current only on an explicit own-IP request.',
+        website: 'Read a user-supplied URL or a URL from earlier public results. CORS applies.',
+      }[group],
+      network: true,
+      schema: obj({ query: { ...(group === 'website' ? str : short), references: true } }),
+    }),
+  ),
   {
     id: 'datetime.now',
     group: 'datetime',

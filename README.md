@@ -47,15 +47,15 @@ No remote AI API, API keys, application backend, accounts, or subscription. A sm
 
 ## Features
 
-|                              | A little capability, at no cost                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 🧠 **On-device chat**        | Stream answers from the browser’s local model, with Markdown, code blocks, and a Stop button.                                  |
-| 🧮 **Useful tools**          | Local arithmetic and timezone checks, plus encyclopedia, repository, weather, place, IP, and exchange-rate lookups.            |
-| 🧭 **Auto tools**            | The local model selects and chains up to six validated tool calls. Switch to **Just chat** to disable automatic tool requests. |
-| 🗂️ **Browser-local history** | Search, switch, delete, copy, and export conversations. Turn persistence off on shared devices.                                |
-| 🔎 **Visible sources**       | Public lookup results include source cards. Place results offer an interactive OpenStreetMap view.                             |
-| 🌱 **Small-model harness**   | Validated plans, bounded context, retained source evidence, deadlines, and cancellation.                                       |
-| 📱 **Responsive interface**  | A quiet, warm palette across desktop and mobile layouts.                                                                       |
+|                              | A little capability, at no cost                                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 🧠 **On-device chat**        | Stream answers from the browser’s local model, with Markdown, code blocks, and a Stop button.                                   |
+| 🧮 **Useful tools**          | Local arithmetic and timezone checks, plus web search, encyclopedia, repository, weather, place, IP, and exchange-rate lookups. |
+| 🧭 **Auto tools**            | The local model selects and chains up to six validated tool calls. Switch to **Just chat** to disable automatic tool requests.  |
+| 🗂️ **Browser-local history** | Search, switch, delete, copy, and export conversations. Turn persistence off on shared devices.                                 |
+| 🔎 **Visible sources**       | Public lookup results include source cards. Place results offer an interactive OpenStreetMap view.                              |
+| 🌱 **Small-model harness**   | Validated plans, bounded context, retained source evidence, deadlines, and cancellation.                                        |
+| 📱 **Responsive interface**  | A quiet, warm palette across desktop and mobile layouts.                                                                        |
 
 ## Give the tiny brain something to do
 

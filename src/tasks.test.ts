@@ -238,6 +238,85 @@ afterEach(() => {
 });
 
 describe('structured chaining', () => {
+  it('chains web search into reading a returned URL and exporting search results', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        reply({
+          results: [
+            {
+              title: 'Search engine guide',
+              url: 'https://search-guide.example/article',
+              description: 'A guide to independent search.',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('Full guide to independent search.', {
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetch);
+    const outcome = await task(
+      'Search the web for independent engines, read the first result, and export the search results as JSON',
+      [
+        { action: 'call', tool: 'web.search', args: { query: 'independent engines' } },
+        { action: 'call', tool: 'website.read', args: { query: { $ref: 'r1.results.0.url' } } },
+        {
+          action: 'call',
+          tool: 'file.export_results',
+          args: { name: 'search.json', format: 'json', resultIds: ['r1'] },
+        },
+        { action: 'finish' },
+      ],
+    );
+    expect(outcome.snapshot.status).toBe('complete');
+    expect(outcome.snapshot.steps.map((s) => s.tool)).toEqual([
+      'web.search',
+      'website.read',
+      'file.export_results',
+    ]);
+    expect(fetch.mock.calls[1][0]).toBe('https://search-guide.example/article');
+    expect(outcome.snapshot.steps[1].result?.data).toMatchObject({
+      text: 'Full guide to independent search.',
+    });
+    const exported = JSON.parse(outcome.snapshot.steps[2].result!.artifact!.content);
+    expect(exported[0].data).toEqual(outcome.snapshot.steps[0].result!.data);
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      setItem: (key: string, value: string) => values.set(key, value),
+      getItem: (key: string) => values.get(key) ?? null,
+    });
+    saveConversations([
+      {
+        id: 'web-chain',
+        title: 'Search',
+        updatedAt: 1,
+        messages: [{ id: 'answer', role: 'assistant', content: 'Results', task: outcome.snapshot }],
+      },
+    ]);
+    expect(loadConversations()[0].messages[0].task?.steps).toEqual(outcome.snapshot.steps);
+  });
+
+  it('applies public-network provenance guards to web search', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const outcome = await task(
+      'Read the attachment, then search the web for its contents',
+      [
+        { action: 'call', tool: 'documents.read', args: { documentId: 'doc-1' } },
+        { action: 'call', tool: 'web.search', args: { query: { $ref: 'r1.text' } } },
+        { action: 'retry', tool: 'web.search', args: { query: { $ref: 'r1.text' } } },
+        { action: 'finish' },
+      ],
+      { documents: [document] },
+    );
+    expect(outcome.snapshot.status).toBe('partial');
+    expect(outcome.snapshot.note).toContain('cannot be sent to a public lookup provider');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('resolves exact numeric and nested table fields without mutating stored results', () => {
     const steps: TaskStep[] = [
       {
