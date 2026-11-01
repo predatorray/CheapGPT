@@ -106,6 +106,8 @@ Send a chat message to start the local model when available. Download progress a
 
 Attachments stay in memory for the current chat; used excerpts, computed tables, and generated files follow the conversation history setting.
 
+**Saved memory** keeps facts you explicitly ask to remember across chats in this browser. Try “Remember that I prefer temperatures in Celsius”. Inspect, edit, forget, clear, or disable saved facts in Settings. Memory uses separate browser storage: turning off conversation history or deleting chats does not clear it. [Memory tools and limits →](docs/tasks.md#saved-memory)
+
 Production builds use Google Analytics (`G-W6LF4ZBZ4Q`) for site usage; the app does not send prompts, conversations, or tool queries as analytics events. Analytics is disabled in development and on localhost and loopback addresses, including local production previews. There are no remotely loaded fonts in the app. OpenStreetMap embeds make a separate request to display the map. **Remember conversations** controls persistence; **Delete all chats** clears saved history.
 
 ## A few honest limitations

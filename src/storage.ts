@@ -6,6 +6,7 @@ function validResult(data: unknown): data is ToolResult {
   const result = data as Record<string, unknown>;
   return (
     [
+      'memory',
       'web',
       'wikipedia',
       'github',

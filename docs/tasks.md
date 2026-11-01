@@ -20,6 +20,14 @@ These are examples, not guaranteed workflows. Nano can make planning and arithme
 
 `web.search` queries Purili's public index and returns `query` and `results` with `title`, `url`, and `description`. Select **Web search** for a keyword lookup, or use Auto tools to combine search with other tools. A later `website.read` call can use a result URL such as `r1.results.0.url`; browser CORS restrictions still apply when reading the page. Results can also be exported directly. Search uses the existing public-network guards, request cancellation, 15-second timeout, and five-minute cache. Search snippets are untrusted source material, not instructions or proof of the full page's contents.
 
+## Saved memory
+
+Ask `Remember that I prefer temperatures in Celsius` to save a named fact locally. `What do you remember about me?` lists saved facts; `Update my memory: I prefer temperatures in Fahrenheit` can replace a fact using the same name; `Forget my temperature preference` removes it. Auto tools or the **Memory** tool group use `memory.save`, `memory.list`, and `memory.forget`. The local model chooses the names and calls, which remain inspectable in Task progress. Saved values must come from the current explicit request, not inferred facts, websites or attached files. Memory changes need the local model when requested through chat.
+
+Saved facts are available to local final replies across chats and reloads, including **Just chat**. They are marked as user-provided context; the current request takes priority. To keep the local model's context bounded, memory supports up to 20 named facts, 60 characters per name, 300 characters per fact, and 5,000 serialized characters overall. Memory may be omitted if the current request needs the context budget. It is not injected into unrelated tool planning, and local memory results cannot be forwarded to public lookup tools.
+
+Open **Settings → Use saved memory** to inspect, edit, forget individual facts, or clear all saved memory. Turning memory off preserves the saved facts but excludes them from reply context and prevents new saves. Inspection and deletion still work. These controls work without loading the model. Memory is stored only in this browser, separately from **Remember conversations**: deleting chats does not clear memory, and forgetting a fact does not remove it from existing messages or saved tool results. Clear those chats separately if needed. Memory does not sync across devices or use a remote service.
+
 ## Attachments and downloads
 
 Use the paperclip to attach up to four `.txt`, `.md`, `.markdown`, `.json`, or `.csv` files. Each file is limited to 1 MB; a chat is limited to 2 MB of attachment text. CSV files support up to 2,000 data rows, 50 unique nonempty column headers, and quoted cells. A dot is required for decimal numeric cells. PDFs, images, spreadsheets, and binary files are not supported by this attachment reader.

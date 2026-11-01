@@ -983,6 +983,22 @@ h1 > span {
   gap: 14px;
   font-size: 13px;
 }
+.memory-settings > p,
+.memory-list p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6d7664;
+}
+.memory-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.memory-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid #e5e8dd;
+  overflow-wrap: anywhere;
+}
 .settings-row p {
   color: #8a937d;
   font-size: 11px;

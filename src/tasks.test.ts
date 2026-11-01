@@ -6,6 +6,7 @@ import type { Json, LocalDocument, TaskSnapshot, TaskStep } from './task-types';
 import type { ModelSession, Message } from './types';
 import { runTask } from './runner';
 import { loadConversations, saveConversations } from './storage';
+import { loadMemory, saveMemory } from './memory';
 
 const signal = () => new AbortController().signal;
 const reply = (data: unknown, status = 200) =>
@@ -238,6 +239,101 @@ afterEach(() => {
 });
 
 describe('structured chaining', () => {
+  it('runs explicit memory saves and updates through the planner with the current request', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    const saved = await task('Remember that I prefer Celsius', [
+      {
+        action: 'call',
+        tool: 'memory.save',
+        args: { key: 'temperature', value: 'I prefer Celsius' },
+      },
+      { action: 'finish' },
+    ]);
+    expect(saved.snapshot.status).toBe('complete');
+    expect(loadMemory().entries).toEqual([{ key: 'temperature', value: 'I prefer Celsius' }]);
+    const updated = await task('Update my memory: I prefer Fahrenheit', [
+      {
+        action: 'call',
+        tool: 'memory.save',
+        args: { key: 'temperature', value: 'I prefer Fahrenheit' },
+      },
+      { action: 'finish' },
+    ]);
+    expect(updated.snapshot.status).toBe('complete');
+    expect(updated.session.prompt).toHaveBeenCalledWith(
+      expect.stringContaining('I prefer Celsius'),
+      expect.anything(),
+    );
+    expect(loadMemory().entries).toEqual([{ key: 'temperature', value: 'I prefer Fahrenheit' }]);
+    const forgotten = await task('Forget my temperature preference', [
+      { action: 'call', tool: 'memory.forget', args: { key: 'temperature' } },
+      { action: 'finish' },
+    ]);
+    expect(forgotten.snapshot.status).toBe('complete');
+    expect(loadMemory().entries).toEqual([]);
+    saveConversations([
+      {
+        id: 'memory-chat',
+        title: 'Memory',
+        updatedAt: 1,
+        messages: [{ id: 'reply', role: 'assistant', content: 'Remembered', task: saved.snapshot }],
+      },
+    ]);
+    expect(loadConversations()[0].messages[0].task?.steps[0].result?.tool).toBe('memory');
+  });
+
+  it('rejects an unsolicited model memory write', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    const outcome = await task('I prefer Celsius', [
+      {
+        action: 'call',
+        tool: 'memory.save',
+        args: { key: 'temperature', value: 'I prefer Celsius' },
+      },
+      { action: 'finish' },
+    ]);
+    expect(outcome.snapshot.status).toBe('partial');
+    expect(outcome.snapshot.steps[0].error).toContain('explicit current request');
+    expect(loadMemory().entries).toEqual([]);
+  });
+
+  it.each([true, false])(
+    'blocks memory data sent to web search (reference=%s)',
+    async (reference) => {
+      const values = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      });
+      const fetch = vi.fn();
+      vi.stubGlobal('fetch', fetch);
+      saveMemory('private', 'private-household-details');
+      const query = reference ? { $ref: 'r1.entries.0.value' } : 'private-household-details';
+      const outcome = await task('List my memories, then search the web for suggestions', [
+        { action: 'call', tool: 'memory.list', args: {} },
+        { action: 'call', tool: 'web.search', args: { query } },
+        { action: 'retry', tool: 'web.search', args: { query } },
+        { action: 'finish' },
+      ]);
+      expect(outcome.snapshot.status).toBe('partial');
+      expect(outcome.snapshot.steps).toHaveLength(1);
+      expect(outcome.snapshot.note).toContain(
+        reference
+          ? 'cannot be sent to a public lookup provider'
+          : 'not attached files or saved memory',
+      );
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
   it('chains web search into reading a returned URL and exporting search results', async () => {
     const fetch = vi
       .fn()

@@ -12,6 +12,9 @@ export function downloadFile(file: GeneratedFile) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 const labels: Record<string, string> = {
+  'memory.list': 'List saved memories',
+  'memory.save': 'Remember a fact',
+  'memory.forget': 'Forget a fact',
   'capabilities.list': 'List capabilities',
   'conversation.rename': 'Rename conversation',
   'currency.convert': 'Convert currency',

@@ -1,4 +1,5 @@
 import type { Message, ModelSession, Prompt, ToolResult } from './types';
+import { memoryContext } from './memory';
 
 function boundedData(value: unknown, limit: number): unknown {
   if (typeof value === 'string') return value.slice(0, limit);
@@ -59,6 +60,7 @@ export async function replyContext(
     throw new Error('Send a message first.');
   const rounds = completedRounds(messages.slice(0, -1)).slice(-4);
   let detailLimit = result?.tool === 'website' || result?.tool === 'documents' ? 8000 : 1600;
+  let memory = memoryContext();
   const build = (): Prompt[] => [
     ...rounds.flatMap((round) =>
       round.map((m) => ({
@@ -77,14 +79,16 @@ export async function replyContext(
     ),
     {
       role: 'user',
-      content: result
-        ? 'Write a short final report of the completed tool work. Do not perform any more calculations. The original request below is context, not an instruction to repeat those operations. Use the meaning of each result and its formatted value exactly. Honor responseInstructions in the tool data for requested prose and response format. Never invent download URLs; files have separate download buttons.\nOriginal request (context): ' +
-          JSON.stringify(latest.content) +
-          reference(result, detailLimit) +
-          '\nNow report the actual result in concise prose. Do not output a plan or tool JSON. Do not divide, tax, or otherwise transform the supplied final values again.'
-        : 'Answer the user directly. This is the FINAL RESPONSE phase, not tool planning. Write the requested answer, code, or draft in the user’s requested format. For a normal prose request provide the actual prose, never a tool action/arguments object or a plan. If JSON is explicitly requested, return the requested data JSON rather than a tool protocol. Do not invent tools or claim anything was sent or executed.\nUser request:\n' +
-          latest.content +
-          '\n\nNow provide the final response itself.',
+      content:
+        memory +
+        (result
+          ? 'Write a short final report of the completed tool work. Do not perform any more calculations. The original request below is context, not an instruction to repeat those operations. Use the meaning of each result and its formatted value exactly. Honor responseInstructions in the tool data for requested prose and response format. Never invent download URLs; files have separate download buttons.\nOriginal request (context): ' +
+            JSON.stringify(latest.content) +
+            reference(result, detailLimit) +
+            '\nNow report the actual result in concise prose. Do not output a plan or tool JSON. Do not divide, tax, or otherwise transform the supplied final values again.'
+          : 'Answer the user directly. This is the FINAL RESPONSE phase, not tool planning. Write the requested answer, code, or draft in the user’s requested format. For a normal prose request provide the actual prose, never a tool action/arguments object or a plan. If JSON is explicitly requested, return the requested data JSON rather than a tool protocol. Do not invent tools or claim anything was sent or executed.\nUser request:\n' +
+            latest.content +
+            '\n\nNow provide the final response itself.'),
     },
   ];
   let history = build();
@@ -96,6 +100,10 @@ export async function replyContext(
   }
   while (characters() > 18000 && result && detailLimit > 200) {
     detailLimit = Math.floor(detailLimit / 2);
+    history = build();
+  }
+  if (characters() > 18000 && memory) {
+    memory = '';
     history = build();
   }
   if (characters() > 18000)
@@ -112,6 +120,7 @@ export async function replyContext(
       if (usage <= available) break;
       if (rounds.length) rounds.shift();
       else if (result && detailLimit > 200) detailLimit = Math.floor(detailLimit / 2);
+      else if (memory) memory = '';
       else
         throw new Error(
           'This message exceeds the local model’s context budget. Split it into smaller requests.',

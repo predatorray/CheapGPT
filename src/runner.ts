@@ -22,6 +22,7 @@ import {
 import { withSession } from './session';
 import { completedRounds } from './context';
 import { isCurrentIpRequest } from './ip';
+import { memoryContext } from './memory';
 import { applyReplayEdits, sourceInstructions, sourceQuotes } from './task-plan';
 
 export interface RunOptions {
@@ -172,13 +173,13 @@ function guardNetwork(
     throw new Error(
       'Local document or utility results cannot be sent to a public lookup provider.',
     );
-  // Attached file text is never a source of remote arguments. Only original prompt text/public data are allowed.
+  // Attached files and memory are not sources of remote arguments. Only prompt text/public data are allowed.
   const allowed = [goal, ...publicStrings(steps)].join('\n');
-  if (documents.length) {
+  if (documents.length || steps.some((step) => step.tool.startsWith('memory.'))) {
     for (const value of Object.values(call.args)) {
       if (typeof value === 'string' && !allowed.toLowerCase().includes(value.toLowerCase()))
         throw new Error(
-          'Public lookup arguments must come from your explicit request or earlier public results, not attached files.',
+          'Public lookup arguments must come from your explicit request or earlier public results, not attached files or saved memory.',
         );
     }
   }
@@ -415,6 +416,7 @@ export async function runTask(options: RunOptions): Promise<TaskOutcome> {
     try {
       const result = await bounded(
         executeTaskTool(call.tool, args, {
+          request: options.goal,
           documents,
           model,
           signal,
@@ -452,7 +454,7 @@ export async function runTask(options: RunOptions): Promise<TaskOutcome> {
           snapshot.planningCalls = (snapshot.planningCalls || 0) + 1;
           emit();
           return session.prompt(
-            `Does THIS user message ask for ANY information or action beyond a social greeting or acknowledgment? Set hasRequest=true for factual questions, writing, calculations, files, changes, previous work or requests to continue. Default to true when uncertain. Set false ONLY for a greeting, thanks or acknowledgment with nothing else requested. Examples: "Hi" -> false; "Hi, can you check the current date?" -> true; "Thanks" -> false; "Thanks, please continue" -> true. A greeting prefix never cancels a request. Set fileRequested=true only for creating/exporting/saving/downloading a file. ${allowSocial ? '' : 'hasRequest MUST be true because a tool was selected or a clarification is pending.'} Do not answer the message; return only these two booleans.\nMessage: ${JSON.stringify(goal)}`,
+            `Does THIS user message ask for ANY information or action beyond a social greeting or acknowledgment? Set hasRequest=true for factual questions, writing, calculations, files, changes, previous work or requests to continue. Default to true when uncertain. Set false ONLY for a greeting, thanks or acknowledgment with nothing else requested. Examples: "Hi" -> false; "Hi, can you check the current date?" -> true; "Thanks" -> false; "Thanks, please continue" -> true. A greeting prefix never cancels a request. Set fileRequested=true only for creating/exporting/saving/downloading a file. Saving, updating or forgetting persistent memory is not file creation. ${allowSocial ? '' : 'hasRequest MUST be true because a tool was selected or a clarification is pending.'} Do not answer the message; return only these two booleans.\nMessage: ${JSON.stringify(goal)}`,
             {
               signal: planningSignal,
               responseConstraint: {
@@ -1122,7 +1124,7 @@ Output only JSON.`,
                                     data: s.result?.data,
                                   })),
                                 Math.max(1000, 6000 >> level),
-                              )}\n${repairNote ? `Repair the invalid arguments: ${repairNote}\n` : ''}Original task (context, do not repeat completed steps): ${JSON.stringify(goal)}\nOutput only the arguments JSON object.`,
+                              )}\n${spec.group === 'memory' ? memoryContext() : ''}${repairNote ? `Repair the invalid arguments: ${repairNote}\n` : ''}Original task (context, do not repeat completed steps): ${JSON.stringify(goal)}\nOutput only the arguments JSON object.`,
                 );
                 snapshot.planningCalls = (snapshot.planningCalls || 0) + 1;
                 emit();

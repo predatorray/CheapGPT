@@ -53,6 +53,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { loadModel, modelAvailability, streamReply } from './model';
 import { TaskPanel } from './TaskPanel';
+import { MemorySettings } from './MemorySettings';
 import { readAttachment } from './documents';
 import { runTask } from './runner';
 import type { LocalDocument, TaskSnapshot } from './task-types';
@@ -62,6 +63,7 @@ import { safeUrl, toolInfo } from './tools';
 import type { Conversation, Message, ModelSession, ModelStatus, ToolChoice, ToolId } from './types';
 
 const toolIcons = {
+  memory: <HistoryRounded />,
   documents: <AttachFileRounded />,
   table: <CalculateOutlined />,
   date_math: <ScheduleOutlined />,
@@ -1135,6 +1137,8 @@ export default function App() {
               Delete all chats
             </Button>
           </div>
+          <Divider sx={{ my: 2 }} />
+          <MemorySettings busy={busy} />
           <Divider sx={{ my: 2 }} />
           <p className="credits">
             An independent, good-humored project by{' '}

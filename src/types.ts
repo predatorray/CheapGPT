@@ -1,5 +1,6 @@
 import type { GeneratedFile, Json, TaskSnapshot } from './task-types';
 export type ToolId =
+  | 'memory'
   | 'web'
   | 'wikipedia'
   | 'github'

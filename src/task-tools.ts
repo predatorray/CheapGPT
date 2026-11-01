@@ -3,6 +3,7 @@ import { calculate } from './calculator';
 import { csvText, queryTable, searchDocuments, tableData } from './documents';
 import { json, runTool } from './tools';
 import { withSession } from './session';
+import { authorizeMemoryChange, forgetMemory, loadMemory, saveMemory } from './memory';
 import { objectSchema as obj, stringSchema as str, resolveArgs, validate } from './task-types';
 import type { Json, LocalDocument, Schema, TaskStep } from './task-types';
 import type { ModelSession, ToolId, ToolResult } from './types';
@@ -19,6 +20,27 @@ export interface TaskTool {
   network?: boolean;
 }
 export const taskTools: TaskTool[] = [
+  {
+    id: 'memory.list',
+    group: 'memory',
+    description:
+      'Inspect saved facts/preferences across chats. This group also saves, updates and forgets memory only on explicit requests. Returns enabled and entries with key/value. Does not change memory.',
+    schema: obj({}),
+  },
+  {
+    id: 'memory.save',
+    group: 'memory',
+    description:
+      'Save a fact only when the current user explicitly asks to remember it or update memory. Value must be copied verbatim from the current request, never inferred or copied from a website/attachment. Use a short descriptive key; reuse an existing key to update a fact.',
+    schema: obj({ key: { ...str, maxLength: 60 }, value: { ...str, maxLength: 300 } }),
+  },
+  {
+    id: 'memory.forget',
+    group: 'memory',
+    description:
+      'Forget one saved fact only on an explicit current forget/remove-memory request. Use its existing key exactly. Does not erase chat history.',
+    schema: obj({ key: { ...str, maxLength: 60 } }),
+  },
   {
     id: 'capabilities.list',
     group: 'capabilities',
@@ -274,6 +296,7 @@ export function fileArgumentsSchema(format: string): Schema {
   throw new Error('Choose an available file format.');
 }
 export interface ToolEnvironment {
+  request?: string;
   documents: LocalDocument[];
   model?: ModelSession | null;
   signal: AbortSignal;
@@ -413,6 +436,29 @@ export async function executeTaskTool(
   const tool = taskTools.find((t) => t.id === id);
   if (!tool) throw new Error('Unknown task tool.');
   validate(tool.schema, args);
+  if (id === 'memory.list') {
+    const state = loadMemory();
+    return result(
+      'memory',
+      `Memory is ${state.enabled ? 'on' : 'off'}. ${state.entries.length} saved facts.`,
+      { enabled: state.enabled, entries: state.entries.map((item) => ({ ...item })) },
+    );
+  }
+  if (id === 'memory.save' || id === 'memory.forget') {
+    authorizeMemoryChange(id, env.request || '', args.value as string | undefined);
+    if (id === 'memory.save') {
+      const saved = saveMemory(args.key as string, args.value as string);
+      return result('memory', `Remembered “${saved.key}” in this browser.`, {
+        key: saved.key,
+        value: saved.value,
+      });
+    }
+    const forgotten = forgetMemory(args.key as string);
+    return result('memory', `Forgot “${forgotten.key}”. Past chat messages are unchanged.`, {
+      key: forgotten.key,
+      forgotten: true,
+    });
+  }
   if (id === 'capabilities.list')
     return result('capabilities', 'Installed capabilities and limits.', {
       text: capabilitySummary(),

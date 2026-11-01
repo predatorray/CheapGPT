@@ -15,6 +15,17 @@ export const toolInfo: {
   quota: string;
   local?: boolean;
 }[] = [
+  {
+    id: 'memory',
+    name: 'Memory',
+    description: 'Remember, inspect, update, or forget facts across chats',
+    placeholder: 'Remember that I prefer temperatures in Celsius',
+    provider: 'Your browser',
+    url: 'https://github.com/predatorray/CheapGPT/blob/main/docs/tasks.md#saved-memory',
+    quota:
+      'Only explicit requests save facts. Up to 20 named facts, 300 characters each, 5,000 characters total including JSON. Stored only in this browser, separately from chat history. Manage or disable in Settings.',
+    local: true,
+  },
   ...(
     [
       {
