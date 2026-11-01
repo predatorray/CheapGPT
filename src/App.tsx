@@ -657,6 +657,16 @@ export default function App() {
                 <InfoOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
+            <Tooltip title="View on GitHub">
+              <IconButton
+                aria-label="View CheapGPT on GitHub"
+                href="https://github.com/predatorray/CheapGPT"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <GitHub fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </div>
         </header>
         <Menu
@@ -1005,7 +1015,15 @@ export default function App() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                GitHub repository
+                GitHub
+              </a>
+              <span aria-hidden="true">·</span>
+              <a
+                href="https://github.com/predatorray/CheapGPT/blob/main/LICENSE"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                MIT License
               </a>
             </footer>
           </div>

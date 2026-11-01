@@ -312,6 +312,14 @@ a {
   justify-content: space-between;
   padding: 0 32px;
   gap: 12px;
+  top: 0;
+  z-index: 10;
+  background: rgb(250 249 246 / 40%);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.sidebar-closed .topbar {
+  position: sticky;
 }
 .topbar-left,
 .topbar-right {
@@ -1060,6 +1068,7 @@ h1 > span {
     display: inline-flex;
   }
   .topbar {
+    position: sticky;
     height: 64px;
     padding: 0 16px 0 10px;
   }
