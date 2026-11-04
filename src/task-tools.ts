@@ -116,7 +116,7 @@ export const taskTools: TaskTool[] = [
           'Search public repositories. Returns repositories with name, url, description, stars, language.',
         places: 'Find a named place, not private device location.',
         weather: 'City forecast. Query is city name only.',
-        ip: 'Explicit IP address, or current only on an explicit own-IP request.',
+        ip: 'Look up a public IP address. For an explicit request for the user’s own IP, pass {"query":"current"}. Otherwise query must be an IPv4/IPv6 address supplied by the user. Never put function calls or code in query.',
         website: 'Read a user-supplied URL or a URL from earlier public results. CORS applies.',
       }[group],
       network: true,

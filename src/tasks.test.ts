@@ -239,6 +239,51 @@ afterEach(() => {
 });
 
 describe('structured chaining', () => {
+  it('constrains own-IP arguments to the caller endpoint and passes its response as evidence', async () => {
+    const fetch = vi.fn().mockResolvedValue(reply({ success: true, ip: '203.0.113.42' }));
+    vi.stubGlobal('fetch', fetch);
+    const outcome = await task(
+      'What is my IP address?',
+      [{ action: 'call', tool: 'ip.lookup', args: { query: 'current' } }, { action: 'finish' }],
+      {
+        messages: [
+          { id: 'u1', role: 'user', content: 'Search for independent search engines' },
+          { id: 'u2', role: 'user', content: 'What is my IP address?' },
+        ],
+      },
+    );
+    expect(outcome.snapshot.status).toBe('complete');
+    const argsCall = vi
+      .mocked(outcome.session.prompt)
+      .mock.calls.find(([input]) =>
+        String(input).startsWith('Generate arguments for ONE IP lookup'),
+      );
+    expect(argsCall?.[1]?.responseConstraint).toMatchObject({
+      properties: { query: { type: 'string', enum: ['current'] } },
+    });
+    expect(String(argsCall?.[0])).toContain('{"query":"current"}');
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('https://ipwho.is/', expect.anything());
+    expect(outcome.snapshot.steps[0].result?.data).toMatchObject({ ip: '203.0.113.42' });
+  });
+  it('does not authorize caller-IP detection for general IP questions', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const outcome = await task(
+      'What is an IP address?',
+      [{ action: 'call', tool: 'ip.lookup', args: { query: 'current' } }, { action: 'finish' }],
+      { messages: [{ id: 'u1', role: 'user', content: 'What is my IP address?' }] },
+    );
+    expect(outcome.snapshot.status).toBe('partial');
+    expect(fetch).not.toHaveBeenCalled();
+    const argsCall = vi
+      .mocked(outcome.session.prompt)
+      .mock.calls.find(([input]) =>
+        String(input).startsWith('Generate arguments for ONE IP lookup'),
+      );
+    expect(argsCall?.[1]?.responseConstraint).not.toMatchObject({
+      properties: { query: { enum: ['current'] } },
+    });
+  });
   it('runs explicit memory saves and updates through the planner with the current request', async () => {
     const values = new Map<string, string>();
     vi.stubGlobal('localStorage', {
