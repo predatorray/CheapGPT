@@ -672,7 +672,7 @@ Output only JSON.`,
       snapshot.planningCalls = (snapshot.planningCalls || 0) + 1;
       emit();
       return session.prompt(
-        `Select only the tool groups needed for THIS message. Ordinary writing/chat needs no groups. Set useHistory=true only if the message needs earlier conversation or results, such as an unstated input, "that", "previous" or "same". Set useHistory=false for a self-contained request with its own inputs.\nMessage: ${JSON.stringify(goal)}\nSelected tool group: ${options.selectedGroup || 'auto'}\nAttachments: ${JSON.stringify(documents.map((d) => ({ name: d.name, columns: d.table?.columns })))}\nGroups: ${JSON.stringify([...new Set(taskTools.map((t) => t.group))].map((group) => ({ id: group, description: taskTools.find((t) => t.group === group)!.description.slice(0, 170) })))}`,
+        `Select only the tool groups needed for THIS message. Ordinary writing/chat needs no groups. Set useHistory=true only if the message needs earlier conversation or results, such as an unstated input, "that", "previous" or "same". Set useHistory=false for a self-contained request with its own inputs.\nMessage: ${JSON.stringify(goal)}\nSelected tool group: ${options.selectedGroup || 'auto'}\nAttachments: ${JSON.stringify(documents.map((d) => ({ name: d.name, columns: d.table?.columns })))}\nGroups: ${JSON.stringify([...new Set(taskTools.map((t) => t.group))].map((group) => ({ id: group, tools: taskTools.filter((t) => t.group === group).map(({ id, description }) => ({ id, description })) })))}`,
         {
           signal: planningSignal,
           responseConstraint: {
