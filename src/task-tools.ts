@@ -98,7 +98,7 @@ export const taskTools: TaskTool[] = [
     id: 'currency.convert',
     group: 'currency',
     description:
-      'Convert a numeric amount using daily reference rates. Returns convertedAmount, rate, date, from, to.',
+      'Convert an amount from one currency to another. Takes amount, from, to; fetches the rate AND multiplies the amount in code. Completes a currency conversion in one call. Returns convertedAmount, value, currency, rate, date, from, to.',
     network: true,
     schema: obj({
       amount: number,
@@ -109,7 +109,8 @@ export const taskTools: TaskTool[] = [
   {
     id: 'currency.rates',
     group: 'currency',
-    description: 'Get base-currency reference rates.',
+    description:
+      'List exchange rates for a base currency. Takes only base; does not accept or convert an amount. For converting money use currency.convert.',
     network: true,
     schema: obj({ base: { ...currency, references: true } }),
   },
@@ -118,14 +119,15 @@ export const taskTools: TaskTool[] = [
       id: `${group}.${({ web: 'search', wikipedia: 'search', github: 'search', places: 'search', weather: 'forecast', ip: 'lookup', website: 'read' } as const)[group]}`,
       group,
       description: {
-        web: 'Search the public internet by keyword using Purili. Returns query and up to 10 ranked results with title, url, description. Snippets are not full page content; use website.read on a result URL when needed.',
+        web: 'Search the public internet for discovery by keyword using Purili. For reading or summarizing an explicit URL use website.read. Returns query and up to 10 ranked results with title, url, description. Snippets are not full page content; use website.read on a result URL when needed.',
         wikipedia: 'Encyclopedia search.',
         github:
-          'Search public repositories. Returns repositories with name, url, description, stars, language.',
+          'Search public repositories and return the requested repository list with name, url, description, stars, language. This completes a repository-search request in one call.',
         places: 'Find a named place, not private device location.',
         weather: 'City forecast. Query is city name only.',
         ip: 'Look up a public IP address. For an explicit request for the user’s own IP, pass {"query":"current"}. Otherwise query must be an IPv4/IPv6 address supplied by the user. Never put function calls or code in query.',
-        website: 'Read a user-supplied URL or a URL from earlier public results. CORS applies.',
+        website:
+          'Fetch page text at an explicit URL to read or summarize its content. Use this tool for a supplied URL, rather than keyword search. CORS applies.',
       }[group],
       network: true,
       schema: obj({ query: { ...(group === 'website' ? str : short), references: true } }),
@@ -142,7 +144,7 @@ export const taskTools: TaskTool[] = [
     id: 'github.read_file',
     group: 'github_file',
     description:
-      'Fetch a public repository README or text file. Repository is owner/name from user input or prior GitHub search. Returns text, repository and path.',
+      'Read file CONTENTS only when requested, not for listing or searching repositories. Repository is owner/name. Optional path is a relative file path such as README.md, never a repository URL; omit path to read the README. Returns text, repository and path.',
     network: true,
     schema: obj(
       {

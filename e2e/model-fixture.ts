@@ -78,7 +78,7 @@ export async function model(
           if (input.startsWith('Does THIS user message')) {
             if ((actions[0] as { action?: string })?.action === 'social') {
               actions.shift();
-              return JSON.stringify({ hasRequest: false, fileRequested: false });
+              return JSON.stringify({ hasRequest: false, fileRequested: false, needsTools: false });
             }
 
             pendingScope = {
@@ -109,6 +109,7 @@ export async function model(
             };
             return JSON.stringify({
               hasRequest: true,
+              needsTools: true,
               fileRequested: pendingScope.fileRequested,
               reply: '',
             });

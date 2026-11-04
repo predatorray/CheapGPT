@@ -7,6 +7,7 @@ import type { ModelSession, Message } from './types';
 import { runTask } from './runner';
 import { loadConversations, saveConversations } from './storage';
 import { loadMemory, saveMemory } from './memory';
+import * as javascript from './javascript';
 
 const signal = () => new AbortController().signal;
 const reply = (data: unknown, status = 200) =>
@@ -88,7 +89,7 @@ function fakeModel(actions: unknown[]) {
       if (typeof input === 'string' && input.startsWith('Does THIS user message')) {
         if ((actions[0] as { action?: string })?.action === 'social') {
           actions.shift();
-          return JSON.stringify({ hasRequest: false, fileRequested: false });
+          return JSON.stringify({ hasRequest: false, fileRequested: false, needsTools: false });
         }
 
         pendingScope = {
@@ -106,6 +107,7 @@ function fakeModel(actions: unknown[]) {
         };
         return JSON.stringify({
           hasRequest: true,
+          needsTools: true,
           fileRequested: pendingScope.fileRequested,
           reply: (actions[0] as { triageReply?: string })?.triageReply || '',
         });
@@ -555,7 +557,7 @@ describe('structured chaining', () => {
       { action: 'call', tool: 'shell', args: {} },
     ]);
     expect(stopped.snapshot.status).toBe('partial');
-    expect(stopped.session.prompt).toHaveBeenCalledTimes(5);
+    expect(stopped.session.prompt).toHaveBeenCalledTimes(4);
   });
   it('completes a flattened-reference chain without consuming the repair budget', async () => {
     const outcome = await task('Multiply twelve by seven then divide the result by three', [
@@ -698,7 +700,7 @@ describe('structured chaining', () => {
       signal: signal(),
       onUpdate: () => {},
     });
-    expect(session.measureContextUsage).toHaveBeenCalledTimes(3);
+    expect(session.measureContextUsage).toHaveBeenCalledTimes(2);
     expect(vi.mocked(session.prompt).mock.calls[0][0]).toContain('UNIQUE_GOAL');
   });
   it('keeps a pending clarification goal and prior successful fields on a follow-up', async () => {
@@ -1023,9 +1025,12 @@ describe('model-directed work only', () => {
     const { base, session } = fakeModel([]);
     session.prompt = vi.fn(async (input) => {
       const text = String(input);
-      if (text.startsWith('Does THIS')) return JSON.stringify({ fileRequested: false });
+      if (text.startsWith('Does THIS'))
+        return JSON.stringify({ fileRequested: false, needsTools: true });
       if (text.startsWith('Select only the tool groups'))
         return JSON.stringify({ useHistory: false, groups: ['calculator'] });
+      if (text.startsWith('Repair this decomposition'))
+        return JSON.stringify({ steps: [{ kind: 'tool', start: 2 }] });
       if (
         text.startsWith('Create an ordered') ||
         text.startsWith('Check this decomposition') ||
@@ -1044,8 +1049,7 @@ describe('model-directed work only', () => {
     });
     expect(outcome.snapshot.status).toBe('partial');
     expect(outcome.snapshot.steps).toHaveLength(0);
-    expect(outcome.snapshot.note).toContain('omitted');
-    expect(outcome.snapshot.note).toContain('multiply by 7');
+    expect(outcome.snapshot.note).toContain('entire request');
   });
   it('inherits the currency of referenced numeric results instead of trusting a malformed model currency', async () => {
     const result = await task('Calculate 4 CAD, then multiply that result by 2', [
@@ -2229,5 +2233,83 @@ describe('conversational history isolation', () => {
     expect(intentPrompt).toContain('Calculate 10 * 2');
     expect(intentPrompt).not.toContain('"request":"Hello"');
     expect(outcome.snapshot.steps[0].result?.data).toMatchObject({ value: 60 });
+  });
+});
+
+describe('prose routing before tool planning', () => {
+  it.each([
+    'Draft a polite follow-up email about an invoice',
+    'Summarize these meeting notes: Maya owns the pilot; deadline Friday.',
+  ])('honors a model prose decision without executing a tool: %s', async (goal) => {
+    const { base, session } = fakeModel([]);
+    session.prompt = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        hasRequest: true,
+        fileRequested: false,
+        needsTools: false,
+      }),
+    );
+    const outcome = await runTask({
+      goal,
+      model: base,
+      documents: [],
+      messages: [],
+      signal: signal(),
+      onUpdate: () => {},
+    });
+    expect(outcome.snapshot.status).toBe('complete');
+    expect(outcome.snapshot.steps).toEqual([]);
+    expect(outcome.context).toBeUndefined();
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('bounded sandbox repair', () => {
+  it('repairs generated code once and preserves both execution attempts', async () => {
+    const run = vi
+      .spyOn(javascript, 'runJavaScript')
+      .mockRejectedValueOnce(new Error('invalid redefinition of parameter name'))
+      .mockResolvedValueOnce({
+        tool: 'javascript',
+        summary: 'Counted words',
+        sources: [],
+        data: { value: { red: 3, blue: 2, green: 1 }, logs: [] },
+      });
+    const { base, session } = fakeModel([
+      {
+        action: 'call',
+        tool: 'javascript.run',
+        args: { code: 'const input = "red"; return input;' },
+      },
+      {
+        action: 'call',
+        tool: 'javascript.run',
+        args: { code: 'return {red:3, blue:2, green:1};' },
+      },
+    ]);
+    const original = vi.mocked(session.prompt).getMockImplementation()!;
+    vi.mocked(session.prompt).mockImplementation((input, options) => {
+      if (typeof input === 'string' && input.startsWith('Bind tools'))
+        return Promise.resolve(
+          JSON.stringify({
+            steps: [{ tool: 'javascript.run', purpose: 'Count these words using JavaScript' }],
+          }),
+        );
+      return original(input, options);
+    });
+    const outcome = await runTask({
+      goal: 'Count these words using JavaScript',
+      model: base,
+      documents: [],
+      messages: [],
+      signal: signal(),
+      onUpdate: () => {},
+    });
+    expect(outcome.snapshot.status, outcome.snapshot.note).toBe('complete');
+    expect(outcome.snapshot.steps.map((step) => step.status)).toEqual(['error', 'done']);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(outcome.context?.data).toMatchObject({
+      results: [{ data: { value: { red: 3, blue: 2, green: 1 } } }],
+    });
   });
 });

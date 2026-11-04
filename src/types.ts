@@ -75,7 +75,11 @@ export interface ModelSession {
   ): Promise<number>;
   prompt(
     input: Prompt[] | string,
-    options?: { signal?: AbortSignal; responseConstraint?: object },
+    options?: {
+      signal?: AbortSignal;
+      responseConstraint?: object;
+      omitResponseConstraintInput?: boolean;
+    },
   ): Promise<string>;
   promptStreaming(
     input: Prompt[] | string,
