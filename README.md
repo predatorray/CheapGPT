@@ -93,6 +93,8 @@ Open [localhost:5173](http://localhost:5173). No environment file or API key req
 
 Send a chat message to start the local model when available. Download progress appears in the conversation; **Stop** cancels setup or generation. This applies to calculator and clock requests too.
 
+For custom programs, select **JavaScript sandbox** or ask Auto tools to use JavaScript. Try “Use JavaScript to count word frequencies in red blue red green blue red”. Programs run locally with execution and memory limits, return structured data, and can chain into calculations, table operations and downloads. [Sandbox usage and limits →](docs/tasks.md#javascript-sandbox)
+
 ## Privacy
 
 | Mode or feature              | What leaves your device?                                                                                          |

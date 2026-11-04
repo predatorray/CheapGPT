@@ -20,6 +20,25 @@ These are examples, not guaranteed workflows. Nano can make planning and arithme
 
 `web.search` queries Purili's public index and returns `query` and `results` with `title`, `url`, and `description`. Select **Web search** for a keyword lookup, or use Auto tools to combine search with other tools. A later `website.read` call can use a result URL such as `r1.results.0.url`; browser CORS restrictions still apply when reading the page. Results can also be exported directly. Search uses the existing public-network guards, request cancellation, 15-second timeout, and five-minute cache. Search snippets are untrusted source material, not instructions or proof of the full page's contents.
 
+## JavaScript sandbox
+
+Use Auto tools or select **JavaScript sandbox** for small programs, custom statistics, text processing, and JSON/table transformations. For example: `Use JavaScript to count word frequencies in "red blue red green blue red"`. The local model writes the code and arguments; the sandbox executes them locally. Simple arithmetic still belongs in the calculator tools. Generated code can make mistakes: expand **Arguments and result** to inspect the program, input, returned value, and console output.
+
+`javascript.run` takes a synchronous function body in `code` and optional JSON `input`. Read that data through the variable `input` and explicitly `return` JSON-compatible data. A missing return becomes `null`. For example:
+
+```json
+{
+  "code": "const sorted = [...input].sort((a, b) => a - b); console.log('Sorted', sorted.length, 'values'); return sorted;",
+  "input": [9, 2, 5]
+}
+```
+
+The result exposes `value` and `logs`; `input` may reference a successful earlier tool result, such as `{"$ref":"r1.table"}`. Numeric return values can feed calculator tools. Returning `{"table":{"columns":["Name","Score"],"rows":[["Alex",12]]}}` also exposes a validated top-level `table` for table operations, inline previews, and CSV exports. Other JSON results can be exported directly.
+
+Each run uses a fresh QuickJS WebAssembly interpreter in a dedicated worker. Guest code has no browser DOM, network, storage, app memory, filesystem, Node.js APIs, module loader, installed packages, timers, or host function bindings. Async results and pending promise jobs are rejected. Interpreter state is discarded after each run; only the supplied JSON input is available. Sandbox outputs remain local data under the runner's public-network guards.
+
+Limits: 12,000 code characters; 64,000 serialized input characters; 32,000 serialized characters for the returned value plus logs; 20 console lines of up to 1,000 characters each; 2,000 array items; 100 object fields; and 12 levels of data nesting. Oversized data is rejected; console lines are truncated. Guest allocations are limited to 16 MiB with a 256 KiB stack limit and a one-second interpreter deadline. The app terminates the worker after three seconds of execution if necessary; startup has a separate 15-second deadline. **Stop** terminates the worker immediately. The same-origin worker and WASM assets are loaded only when this tool runs. Failed runs are reported as failed steps and are not used as successful evidence.
+
 ## Saved memory
 
 Ask `Remember that I prefer temperatures in Celsius` to save a named fact locally. `What do you remember about me?` lists saved facts; `Update my memory: I prefer temperatures in Fahrenheit` can replace a fact using the same name; `Forget my temperature preference` removes it. Auto tools or the **Memory** tool group use `memory.save`, `memory.list`, and `memory.forget`. The local model chooses the names and calls, which remain inspectable in Task progress. Saved values must come from the current explicit request, not inferred facts, websites or attached files. Memory changes need the local model when requested through chat.
@@ -95,7 +114,7 @@ Date arithmetic adds elapsed days, hours, or minutes. A day is 24 hours, not a b
 
 ## Boundaries and verification
 
-Tools can read public endpoints and prepare local outputs; they cannot execute arbitrary JavaScript, send messages, change repository files, or change repository files. The model can invoke `conversation.rename` only when the user explicitly requested a title change. `capabilities.list` supplies the installed capability list through the same model-directed loop.
+Tools can read public endpoints and prepare local outputs. `javascript.run` executes synchronous JavaScript only within its isolated interpreter and resource limits; it cannot access browser storage, the network, or the filesystem. Tools cannot send messages or change repository files. The model can invoke `conversation.rename` only when the user explicitly requested a title change. `capabilities.list` supplies the installed capability list through the same model-directed loop.
 
 Network tools cannot receive references derived from local document/utility results. When files are attached, public lookup arguments must come from the explicit request or earlier public results. Website URLs and repository names must be supplied by the user or earlier public results; IP lookups require an explicit address or own-IP request. Retrieved text remains untrusted reference data.
 

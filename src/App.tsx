@@ -46,6 +46,7 @@ import {
   PublicRounded,
   CurrencyExchangeRounded,
   CalculateOutlined,
+  CodeRounded,
   ScheduleOutlined,
   AttachFileRounded,
 } from '@mui/icons-material';
@@ -63,6 +64,7 @@ import { safeUrl, toolInfo } from './tools';
 import type { Conversation, Message, ModelSession, ModelStatus, ToolChoice, ToolId } from './types';
 
 const toolIcons = {
+  javascript: <CodeRounded />,
   memory: <HistoryRounded />,
   documents: <AttachFileRounded />,
   table: <CalculateOutlined />,

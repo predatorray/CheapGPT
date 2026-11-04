@@ -16,6 +16,17 @@ export const toolInfo: {
   local?: boolean;
 }[] = [
   {
+    id: 'javascript',
+    name: 'JavaScript sandbox',
+    description: 'Run small programs and transform data locally',
+    placeholder: 'Use JavaScript to count word frequencies in "red blue red green blue red"',
+    provider: 'Your device / QuickJS WebAssembly',
+    url: 'https://github.com/justjake/quickjs-emscripten',
+    quota:
+      'Synchronous JavaScript in an isolated interpreter and worker. No browser, storage, network, packages or timers. 1-second execution limit, 16 MiB guest memory, 12,000 code characters, 64,000 input and 32,000 output characters. Fresh state each run.',
+    local: true,
+  },
+  {
     id: 'memory',
     name: 'Memory',
     description: 'Remember, inspect, update, or forget facts across chats',

@@ -3,6 +3,7 @@ import { calculate } from './calculator';
 import { csvText, queryTable, searchDocuments, tableData } from './documents';
 import { json, runTool } from './tools';
 import { withSession } from './session';
+import { runJavaScript } from './javascript';
 import { authorizeMemoryChange, forgetMemory, loadMemory, saveMemory } from './memory';
 import { objectSchema as obj, stringSchema as str, resolveArgs, validate } from './task-types';
 import type { Json, LocalDocument, Schema, TaskStep } from './task-types';
@@ -20,6 +21,13 @@ export interface TaskTool {
   network?: boolean;
 }
 export const taskTools: TaskTool[] = [
+  {
+    id: 'javascript.run',
+    group: 'javascript',
+    description:
+      'Run synchronous JavaScript for custom data transforms, statistics, algorithms or code checks. Code is a function body: read JSON data from input and explicitly return JSON-compatible data. console.log/info/warn/error are captured. Returns value and logs. Return {table:{columns,rows}} to also expose a table for CSV export and table tools. Isolated interpreter: no DOM, storage, network, imports, timers, packages or async execution. Use calculator tools for simple arithmetic. Limits: 1 second, 16 MiB guest memory, 12,000 code characters, 32,000 output characters.',
+    schema: obj({ code: str, input: { references: true } }, ['code']),
+  },
   {
     id: 'memory.list',
     group: 'memory',
@@ -436,6 +444,8 @@ export async function executeTaskTool(
   const tool = taskTools.find((t) => t.id === id);
   if (!tool) throw new Error('Unknown task tool.');
   validate(tool.schema, args);
+  if (id === 'javascript.run')
+    return runJavaScript(args.code as string, args.input ?? null, env.signal);
   if (id === 'memory.list') {
     const state = loadMemory();
     return result(
@@ -479,7 +489,9 @@ export async function executeTaskTool(
       const data = step.result?.data;
       return (
         step.status === 'done' &&
-        ['currency.convert', 'calculator.adjust', 'calculator.evaluate'].includes(step.tool) &&
+        ['currency.convert', 'calculator.adjust', 'calculator.evaluate', 'javascript.run'].includes(
+          step.tool,
+        ) &&
         data &&
         typeof data === 'object' &&
         !Array.isArray(data) &&

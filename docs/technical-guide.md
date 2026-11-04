@@ -49,6 +49,8 @@ Unsupported browsers show setup guidance, rather than invented AI replies. Every
 
 ## A few free tools
 
+The [JavaScript sandbox](tasks.md#javascript-sandbox) adds `javascript.run` for synchronous code and data transforms. It uses pinned QuickJS WebAssembly dependencies, a fresh worker/runtime per run, no guest host bindings, bounded JSON input/output, interpreter allocation/stack/interrupt limits, and a parent watchdog. Vite bundles the worker, its dynamic imports and the WASM asset with relative URLs for GitHub Pages subpaths. Worker-only dependencies are prebundled in development to avoid a first-use optimizer reload. Console output and returned JSON stay in the task evidence; numeric and table results can feed existing tools and exports.
+
 **Auto tools is enabled by default.** Nano selects validated calls and consumes their structured results. See [tasks and chaining](tasks.md) for attachments, table operations, file exports, and limits. General writing, coding, and casual chat stay local. Choose **Just chat** to disable tools, or select a tool group to restrict the model's choices. Source cards show provider evidence alongside the model's answer.
 
 | Tool           | Example input                | Public service / limits                                                                                                                                                                                                                           |
