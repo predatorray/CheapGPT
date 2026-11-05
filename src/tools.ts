@@ -214,281 +214,280 @@ export function safeUrl(value: string) {
   }
 }
 
-export async function runTool(
-  tool: ToolId,
-  input: string,
-  signal: AbortSignal,
-): Promise<ToolResult> {
-  signal.throwIfAborted();
-  if (tool === 'calculator')
-    return {
-      tool,
-      summary: calculationSummary(input),
-      sources: [],
-      data: { value: calculate(calculatorExpression(input) ?? input.trim()) },
-    };
-  if (tool === 'datetime') {
-    const query = dateTimeQuery(input) ?? input.trim();
-    const timeZone = /^(?:local|now|today|timezone)$/i.test(query)
-      ? Intl.DateTimeFormat().resolvedOptions().timeZone
-      : query;
-    const now = new Date();
-    return {
-      tool,
-      summary: dateTimeSummary(input, now),
-      sources: [],
-      data: { instant: now.toISOString(), timeZone },
-    };
-  }
-  if (tool === 'website') return readWebsite(input, signal);
-  const query = input.trim().slice(0, 300);
-  if (!query) throw new Error('Give this tool something to look up first.');
-  signal.throwIfAborted();
-  if (tool === 'web') {
-    const data = await json<{ results?: unknown }>(
-      url('https://puri.li/api/search', { q: query }),
-      signal,
-    );
-    if (!data || !Array.isArray(data.results))
-      throw new Error('The search service returned an invalid response. Please try again later.');
-    const results = data.results.slice(0, 10).flatMap((item: unknown) => {
-      if (!item || typeof item !== 'object') return [];
-      const result = item as Record<string, unknown>;
-      const link = typeof result.url === 'string' ? safeUrl(result.url) : undefined;
-      if (!link || typeof result.title !== 'string') return [];
-      return [
-        {
-          title: result.title.slice(0, 300),
-          url: link,
-          description:
-            typeof result.description === 'string' ? result.description.slice(0, 1600) : '',
-        },
-      ];
-    });
-    return {
-      tool,
-      data: { query, results },
-      summary: results.length
-        ? `Found ${results.length} web results via Purili. These are indexed snippets; read a page for more detail.`
-        : 'No web results found. Try broader or different keywords.',
-      sources: results.map((result) => ({
-        title: result.title,
-        url: result.url,
-        detail: result.description || 'No snippet available.',
-      })),
-    };
-  }
-  if (tool === 'wikipedia') {
-    const data = await json<{
-      query?: {
-        pages?: Record<
-          string,
-          { title: string; extract?: string; fullurl: string; index?: number }
-        >;
-      };
-    }>(
-      url('https://en.wikipedia.org/w/api.php', {
-        action: 'query',
-        generator: 'search',
-        gsrsearch: query,
-        gsrlimit: '3',
-        prop: 'extracts|info',
-        exintro: '1',
-        explaintext: '1',
-        exsentences: '4',
-        inprop: 'url',
-        format: 'json',
-        origin: '*',
-      }),
-      signal,
-    );
-    const sources = Object.values(data.query?.pages || {})
-      .sort((a, b) => (a.index || 0) - (b.index || 0))
-      .map((p) => ({
-        title: p.title,
-        url: p.fullurl,
-        detail: p.extract?.slice(0, 1600) || 'No summary available.',
-      }));
-    return {
-      tool,
-      data: { articles: sources },
-      summary: sources.length
-        ? `Found ${sources.length} articles. Someone already did the homework.`
-        : 'No encyclopedia articles found. Try a different topic.',
-      sources,
-    };
-  }
-  if (tool === 'github') {
-    const data = await json<{
-      items: {
-        full_name: string;
-        html_url: string;
-        description: string | null;
-        stargazers_count: number;
-        language: string | null;
-      }[];
-    }>(
-      url('https://api.github.com/search/repositories', { q: query, sort: 'stars', per_page: '4' }),
-      signal,
-    );
-    return {
-      tool,
-      data: {
-        repositories: data.items.map((r) => ({
-          name: r.full_name,
-          url: r.html_url,
-          description: r.description,
-          stars: r.stargazers_count,
-          language: r.language,
-        })),
+type ToolHandler = (input: string, signal: AbortSignal, tool: ToolId) => Promise<ToolResult>;
+
+const calculatorHandler: ToolHandler = async (input, _signal, tool) => {
+  return {
+    tool,
+    summary: calculationSummary(input),
+    sources: [],
+    data: { value: calculate(calculatorExpression(input) ?? input.trim()) },
+  };
+};
+
+const datetimeHandler: ToolHandler = async (input, _signal, tool) => {
+  const query = dateTimeQuery(input) ?? input.trim();
+  const timeZone = /^(?:local|now|today|timezone)$/i.test(query)
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone
+    : query;
+  const now = new Date();
+  return {
+    tool,
+    summary: dateTimeSummary(input, now),
+    sources: [],
+    data: { instant: now.toISOString(), timeZone },
+  };
+};
+
+const webHandler: ToolHandler = async (query, signal, tool): Promise<ToolResult> => {
+  const data = await json<{ results?: unknown }>(
+    url('https://puri.li/api/search', { q: query }),
+    signal,
+  );
+  if (!data || !Array.isArray(data.results))
+    throw new Error('The search service returned an invalid response. Please try again later.');
+  const results = data.results.slice(0, 10).flatMap((item: unknown) => {
+    if (!item || typeof item !== 'object') return [];
+    const result = item as Record<string, unknown>;
+    const link = typeof result.url === 'string' ? safeUrl(result.url) : undefined;
+    if (!link || typeof result.title !== 'string') return [];
+    return [
+      {
+        title: result.title.slice(0, 300),
+        url: link,
+        description:
+          typeof result.description === 'string' ? result.description.slice(0, 1600) : '',
       },
-      summary: data.items.length
-        ? 'Public repositories, sorted by stars. Popularity is our entire due diligence.'
-        : 'No repositories found. Try a broader search.',
-      sources: data.items.map((r) => ({
-        title: r.full_name,
+    ];
+  });
+  return {
+    tool,
+    data: { query, results },
+    summary: results.length
+      ? `Found ${results.length} web results via Purili. These are indexed snippets; read a page for more detail.`
+      : 'No web results found. Try broader or different keywords.',
+    sources: results.map((result) => ({
+      title: result.title,
+      url: result.url,
+      detail: result.description || 'No snippet available.',
+    })),
+  };
+};
+
+const wikipediaHandler: ToolHandler = async (query, signal, tool): Promise<ToolResult> => {
+  const data = await json<{
+    query?: {
+      pages?: Record<string, { title: string; extract?: string; fullurl: string; index?: number }>;
+    };
+  }>(
+    url('https://en.wikipedia.org/w/api.php', {
+      action: 'query',
+      generator: 'search',
+      gsrsearch: query,
+      gsrlimit: '3',
+      prop: 'extracts|info',
+      exintro: '1',
+      explaintext: '1',
+      exsentences: '4',
+      inprop: 'url',
+      format: 'json',
+      origin: '*',
+    }),
+    signal,
+  );
+  const sources = Object.values(data.query?.pages || {})
+    .sort((a, b) => (a.index || 0) - (b.index || 0))
+    .map((p) => ({
+      title: p.title,
+      url: p.fullurl,
+      detail: p.extract?.slice(0, 1600) || 'No summary available.',
+    }));
+  return {
+    tool,
+    data: { articles: sources },
+    summary: sources.length
+      ? `Found ${sources.length} articles. Someone already did the homework.`
+      : 'No encyclopedia articles found. Try a different topic.',
+    sources,
+  };
+};
+
+const githubHandler: ToolHandler = async (query, signal, tool): Promise<ToolResult> => {
+  const data = await json<{
+    items: {
+      full_name: string;
+      html_url: string;
+      description: string | null;
+      stargazers_count: number;
+      language: string | null;
+    }[];
+  }>(
+    url('https://api.github.com/search/repositories', { q: query, sort: 'stars', per_page: '4' }),
+    signal,
+  );
+  return {
+    tool,
+    data: {
+      repositories: data.items.map((r) => ({
+        name: r.full_name,
         url: r.html_url,
-        detail: `${r.description || 'No description'} · ${r.stargazers_count.toLocaleString()} stars · ${r.language || 'Various languages'}`,
+        description: r.description,
+        stars: r.stargazers_count,
+        language: r.language,
       })),
-    };
+    },
+    summary: data.items.length
+      ? 'Public repositories, sorted by stars. Popularity is our entire due diligence.'
+      : 'No repositories found. Try a broader search.',
+    sources: data.items.map((r) => ({
+      title: r.full_name,
+      url: r.html_url,
+      detail: `${r.description || 'No description'} · ${r.stargazers_count.toLocaleString()} stars · ${r.language || 'Various languages'}`,
+    })),
+  };
+};
+
+const placesHandler: ToolHandler = async (query, signal, tool): Promise<ToolResult> => {
+  const endpoint = url('https://nominatim.openstreetmap.org/search', {
+    q: query,
+    format: 'jsonv2',
+    limit: '3',
+  });
+  const cached = cache.get(endpoint);
+  if (!cached || Date.now() - cached.time >= 300_000) {
+    if (Date.now() - lastPlaceRequest < 1100)
+      throw new Error('OpenStreetMap asks for a pause between searches. Try again in a second.');
+    lastPlaceRequest = Date.now();
   }
-  if (tool === 'places') {
-    const endpoint = url('https://nominatim.openstreetmap.org/search', {
-      q: query,
-      format: 'jsonv2',
-      limit: '3',
-    });
-    const cached = cache.get(endpoint);
-    if (!cached || Date.now() - cached.time >= 300_000) {
-      if (Date.now() - lastPlaceRequest < 1100)
-        throw new Error('OpenStreetMap asks for a pause between searches. Try again in a second.');
-      lastPlaceRequest = Date.now();
-    }
-    const data = await json<{ display_name: string; lat: string; lon: string; type: string }[]>(
-      endpoint,
-      signal,
-    );
-    return {
-      tool,
-      data: {
-        places: data.map((p) => ({
-          name: p.display_name,
-          latitude: Number(p.lat),
-          longitude: Number(p.lon),
-        })),
-      },
-      summary: data.length
-        ? 'Places found. Navigation skills sold separately. Data © OpenStreetMap contributors.'
-        : 'No places found. Add a city or country to your search.',
-      sources: data.map((p) => ({
-        title: p.display_name,
-        location: { latitude: Number(p.lat), longitude: Number(p.lon) },
-        url: `https://www.openstreetmap.org/?mlat=${encodeURIComponent(p.lat)}&mlon=${encodeURIComponent(p.lon)}#map=14/${encodeURIComponent(p.lat)}/${encodeURIComponent(p.lon)}`,
-        detail: `${p.type} · ${p.lat}, ${p.lon} · © OpenStreetMap contributors`,
+  const data = await json<{ display_name: string; lat: string; lon: string; type: string }[]>(
+    endpoint,
+    signal,
+  );
+  return {
+    tool,
+    data: {
+      places: data.map((p) => ({
+        name: p.display_name,
+        latitude: Number(p.lat),
+        longitude: Number(p.lon),
       })),
+    },
+    summary: data.length
+      ? 'Places found. Navigation skills sold separately. Data © OpenStreetMap contributors.'
+      : 'No places found. Add a city or country to your search.',
+    sources: data.map((p) => ({
+      title: p.display_name,
+      location: { latitude: Number(p.lat), longitude: Number(p.lon) },
+      url: `https://www.openstreetmap.org/?mlat=${encodeURIComponent(p.lat)}&mlon=${encodeURIComponent(p.lon)}#map=14/${encodeURIComponent(p.lat)}/${encodeURIComponent(p.lon)}`,
+      detail: `${p.type} · ${p.lat}, ${p.lon} · © OpenStreetMap contributors`,
+    })),
+  };
+};
+
+const weatherHandler: ToolHandler = async (query, signal, tool): Promise<ToolResult> => {
+  const geo = await json<{
+    results?: { name: string; country: string; latitude: number; longitude: number }[];
+  }>(
+    url('https://geocoding-api.open-meteo.com/v1/search', {
+      name: query,
+      count: '1',
+      language: 'en',
+      format: 'json',
+    }),
+    signal,
+  );
+  const place = geo.results?.[0];
+  if (!place) throw new Error('City not found. Try a city name such as Vancouver or Tokyo.');
+  const data = await json<{
+    current: { temperature_2m: number; apparent_temperature: number; wind_speed_10m: number };
+    daily: {
+      time: string[];
+      temperature_2m_max: number[];
+      temperature_2m_min: number[];
+      precipitation_probability_max: number[];
     };
-  }
-  if (tool === 'weather') {
-    const geo = await json<{
-      results?: { name: string; country: string; latitude: number; longitude: number }[];
-    }>(
-      url('https://geocoding-api.open-meteo.com/v1/search', {
-        name: query,
-        count: '1',
-        language: 'en',
-        format: 'json',
-      }),
-      signal,
-    );
-    const place = geo.results?.[0];
-    if (!place) throw new Error('City not found. Try a city name such as Vancouver or Tokyo.');
-    const data = await json<{
-      current: { temperature_2m: number; apparent_temperature: number; wind_speed_10m: number };
-      daily: {
-        time: string[];
-        temperature_2m_max: number[];
-        temperature_2m_min: number[];
-        precipitation_probability_max: number[];
-      };
-    }>(
-      url('https://api.open-meteo.com/v1/forecast', {
-        latitude: String(place.latitude),
-        longitude: String(place.longitude),
-        current: 'temperature_2m,apparent_temperature,wind_speed_10m',
-        daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
-        timezone: 'auto',
-        forecast_days: '3',
-      }),
-      signal,
-    );
-    const detail =
-      `Now: ${data.current.temperature_2m}°C, feels like ${data.current.apparent_temperature}°C; wind ${data.current.wind_speed_10m} km/h.\n` +
-      data.daily.time
-        .map(
-          (day, i) =>
-            `${day}: ${data.daily.temperature_2m_min[i]}–${data.daily.temperature_2m_max[i]}°C; rain chance ${data.daily.precipitation_probability_max[i] ?? 'unknown'}%.`,
-        )
-        .join('\n');
-    return {
-      tool,
-      data: {
-        name: place.name,
-        country: place.country,
-        latitude: place.latitude,
-        longitude: place.longitude,
-        current: data.current,
-        daily: data.daily,
+  }>(
+    url('https://api.open-meteo.com/v1/forecast', {
+      latitude: String(place.latitude),
+      longitude: String(place.longitude),
+      current: 'temperature_2m,apparent_temperature,wind_speed_10m',
+      daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+      timezone: 'auto',
+      forecast_days: '3',
+    }),
+    signal,
+  );
+  const detail =
+    `Now: ${data.current.temperature_2m}°C, feels like ${data.current.apparent_temperature}°C; wind ${data.current.wind_speed_10m} km/h.\n` +
+    data.daily.time
+      .map(
+        (day, i) =>
+          `${day}: ${data.daily.temperature_2m_min[i]}–${data.daily.temperature_2m_max[i]}°C; rain chance ${data.daily.precipitation_probability_max[i] ?? 'unknown'}%.`,
+      )
+      .join('\n');
+  return {
+    tool,
+    data: {
+      name: place.name,
+      country: place.country,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      current: data.current,
+      daily: data.daily,
+    },
+    summary: `Weather in ${place.name}, ${place.country}. A forecast, not a promise.`,
+    sources: [
+      {
+        title: `${place.name} · 3-day forecast`,
+        url: `https://open-meteo.com/en/docs#latitude=${place.latitude}&longitude=${place.longitude}`,
+        detail: detail + '\nSource: Open-Meteo (CC BY 4.0); geocoding: GeoNames.',
       },
-      summary: `Weather in ${place.name}, ${place.country}. A forecast, not a promise.`,
-      sources: [
-        {
-          title: `${place.name} · 3-day forecast`,
-          url: `https://open-meteo.com/en/docs#latitude=${place.latitude}&longitude=${place.longitude}`,
-          detail: detail + '\nSource: Open-Meteo (CC BY 4.0); geocoding: GeoNames.',
-        },
-      ],
-    };
-  }
-  if (tool === 'ip') {
-    // Caller-IP detection is only requested by an explicit user request, never on page load.
-    const current = query.toLowerCase() === CURRENT_IP_QUERY || isCurrentIpRequest(query);
-    const v4 =
-      /^(\d{1,3}\.){3}\d{1,3}$/.test(query) && query.split('.').every((n) => Number(n) <= 255);
-    const v6 = query.includes(':') && /^[0-9a-f:]+$/i.test(query) && query.length <= 39;
-    if (!current && !v4 && !v6)
-      throw new Error('Enter an explicit IPv4 or IPv6 address, or ask “What’s my IP address?”.');
-    const data = await json<{
-      success: boolean;
-      message?: string;
-      ip: string;
-      city: string;
-      region: string;
-      country: string;
-      connection?: { isp: string };
-      timezone?: { id: string };
-    }>(
-      current ? 'https://ipwho.is/' : `https://ipwho.is/${encodeURIComponent(query)}`,
-      signal,
-      !current,
-    );
-    if (!data.success) throw new Error(data.message || 'This address could not be looked up.');
-    if (typeof data.ip !== 'string' || !data.ip.trim())
-      throw new Error('The IP service returned no address. No IP address has been guessed.');
-    return {
-      tool,
-      data: JSON.parse(JSON.stringify(data)),
-      summary: current
-        ? `Your public IP address, as reported by ipwho.is, is **${data.ip}**. This is the address seen by the service; it may be your VPN or proxy’s exit address. Location information is approximate.`
-        : `IP lookup for **${data.ip}**. Location information is approximate; this is not a street address.`,
-      sources: [
-        {
-          title: data.ip,
-          url: 'https://ipwhois.io/',
-          detail: `${data.city}, ${data.region}, ${data.country} · ISP: ${data.connection?.isp || 'Unknown'} · Time zone: ${data.timezone?.id || 'Unknown'}`,
-        },
-      ],
-    };
-  }
+    ],
+  };
+};
+
+const ipHandler: ToolHandler = async (query, signal, tool): Promise<ToolResult> => {
+  // Caller-IP detection is only requested by an explicit user request, never on page load.
+  const current = query.toLowerCase() === CURRENT_IP_QUERY || isCurrentIpRequest(query);
+  const v4 =
+    /^(\d{1,3}\.){3}\d{1,3}$/.test(query) && query.split('.').every((n) => Number(n) <= 255);
+  const v6 = query.includes(':') && /^[0-9a-f:]+$/i.test(query) && query.length <= 39;
+  if (!current && !v4 && !v6)
+    throw new Error('Enter an explicit IPv4 or IPv6 address, or ask “What’s my IP address?”.');
+  const data = await json<{
+    success: boolean;
+    message?: string;
+    ip: string;
+    city: string;
+    region: string;
+    country: string;
+    connection?: { isp: string };
+    timezone?: { id: string };
+  }>(
+    current ? 'https://ipwho.is/' : `https://ipwho.is/${encodeURIComponent(query)}`,
+    signal,
+    !current,
+  );
+  if (!data.success) throw new Error(data.message || 'This address could not be looked up.');
+  if (typeof data.ip !== 'string' || !data.ip.trim())
+    throw new Error('The IP service returned no address. No IP address has been guessed.');
+  return {
+    tool,
+    data: JSON.parse(JSON.stringify(data)),
+    summary: current
+      ? `Your public IP address, as reported by ipwho.is, is **${data.ip}**. This is the address seen by the service; it may be your VPN or proxy’s exit address. Location information is approximate.`
+      : `IP lookup for **${data.ip}**. Location information is approximate; this is not a street address.`,
+    sources: [
+      {
+        title: data.ip,
+        url: 'https://ipwhois.io/',
+        detail: `${data.city}, ${data.region}, ${data.country} · ISP: ${data.connection?.isp || 'Unknown'} · Time zone: ${data.timezone?.id || 'Unknown'}`,
+      },
+    ],
+  };
+};
+
+const currencyHandler: ToolHandler = async (query, signal, tool): Promise<ToolResult> => {
   const conversion = extractCurrencyConversion(query);
   if (!conversion && !/^[a-z]{3}$/i.test(query))
     throw new Error(
@@ -541,4 +540,36 @@ export async function runTool(
       },
     ],
   };
+};
+
+// Raw-input tools intentionally bypass the public-search query limits.
+const rawInputHandlers = new Map<ToolId, ToolHandler>([
+  ['calculator', calculatorHandler],
+  ['datetime', datetimeHandler],
+  ['website', readWebsite],
+]);
+const lookupHandlers = new Map<ToolId, ToolHandler>([
+  ['web', webHandler],
+  ['wikipedia', wikipediaHandler],
+  ['github', githubHandler],
+  ['places', placesHandler],
+  ['weather', weatherHandler],
+  ['ip', ipHandler],
+  ['currency', currencyHandler],
+]);
+
+export async function runTool(
+  tool: ToolId,
+  input: string,
+  signal: AbortSignal,
+): Promise<ToolResult> {
+  signal.throwIfAborted();
+  const rawHandler = rawInputHandlers.get(tool);
+  if (rawHandler) return rawHandler(input, signal, tool);
+  const query = input.trim().slice(0, 300);
+  if (!query) throw new Error('Give this tool something to look up first.');
+  signal.throwIfAborted();
+  // Preserve the legacy currency fallback for groups executed through task tools.
+  const handler = lookupHandlers.get(tool) ?? currencyHandler;
+  return handler(query, signal, tool);
 }

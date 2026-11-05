@@ -15,6 +15,7 @@ import {
 } from './task-types';
 import {
   executeTaskTool,
+  findTaskTool,
   fileArgumentsSchema,
   referenceUsesLocalData,
   taskTools,
@@ -148,9 +149,7 @@ function resultReferences(steps: TaskStep[]): string[] {
 
 function publicStrings(steps: TaskStep[]): string[] {
   return steps
-    .filter(
-      (step) => step.status === 'done' && taskTools.find((tool) => tool.id === step.tool)?.network,
-    )
+    .filter((step) => step.status === 'done' && findTaskTool(step.tool)?.network)
     .flatMap((step) => [
       JSON.stringify(step.result?.data || {}),
       JSON.stringify(step.result?.sources || []),
@@ -169,7 +168,7 @@ function guardNetwork(
     !/\b(?:rename|(?:change|set)\b.*\btitle)\b/i.test(goal)
   )
     throw new Error('Renaming requires an explicit user request.');
-  if (!taskTools.find((t) => t.id === call.tool)?.network) return;
+  if (!findTaskTool(call.tool)?.network) return;
   if (referenceUsesLocalData(raw.args, steps))
     throw new Error(
       'Local document or utility results cannot be sent to a public lookup provider.',
@@ -334,7 +333,7 @@ export async function runTask(options: RunOptions): Promise<TaskOutcome> {
       throw new Error('A tool call needs tool and object args.');
     if (JSON.stringify(raw.args).length > 140000)
       throw new Error('Tool arguments exceed the task budget.');
-    const spec = taskTools.find((t) => t.id === raw.tool);
+    const spec = findTaskTool(raw.tool);
     if (!spec) throw new Error('Choose an available tool for this task.');
     const normalized = normalizeCallReferences(structuredClone(raw));
     normalized.args = normalizeArgumentReferences(
