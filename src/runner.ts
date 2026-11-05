@@ -938,12 +938,10 @@ User message: ${JSON.stringify(goal)}`,
         throw new Error(
           'The tool-call budget was reached before all requested operations completed.',
         );
-      // Each source action binds one executable tool. Document extraction may
-      // first need a read/search to supply its text input.
-      const bindingLimit = Math.min(
-        available.some((tool) => tool.group === 'documents') ? 3 : 1,
-        remaining,
-      );
+      // One action can require several independent inputs, such as reading
+      // both repositories in a comparison. Keep that sequence bounded; the
+      // validation below still rejects alternative calculators for one action.
+      const bindingLimit = Math.min(3, remaining);
       const hints = [
         available.some((tool) => tool.id === 'javascript.run')
           ? 'Use javascript.run for explicit JavaScript execution, custom algorithms or data transforms. Code must return its result; input carries data from earlier steps.'
