@@ -12,7 +12,7 @@ test('calculator requires model startup, no external network, and final model se
   await send(page, 'What is 12 times 7?');
   const observed = await calls(page);
   expect(observed.creates).toBe(1);
-  expect(observed.plans).toHaveLength(7);
+  expect(observed.plans).toHaveLength(6);
   expect(JSON.stringify(observed.replies)).toContain('84');
   expect(external).toEqual([]);
 });

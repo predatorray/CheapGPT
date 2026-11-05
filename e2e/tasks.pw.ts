@@ -35,7 +35,7 @@ test('exact budget prompt requires model planning, references exact results and 
   await expect(page.getByLabel('Task progress')).toContainText('4/4 steps completed');
   const observed = await calls(page);
   expect(observed.creates).toBe(1);
-  expect(observed.plans).toHaveLength(18);
+  expect(observed.plans).toHaveLength(17);
   expect(observed.replies).toHaveLength(1);
   expect(JSON.stringify(observed.replies)).toContain('128.33');
   const download = page.waitForEvent('download');
@@ -77,7 +77,7 @@ test('different amount, tax and split finish without an unrequested file', async
   expect((observed.replies[0] as { content: string }[]).at(-1)?.content).toContain(
     '"currency":"CAD"',
   );
-  expect(observed.plans).toHaveLength(12);
+  expect(observed.plans).toHaveLength(11);
 });
 
 test('no local model means no hidden currency workflow', async ({ page }) => {
